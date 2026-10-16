@@ -21,9 +21,9 @@ The tool *manages* Nebula `config.yml` files, and *is configured by* `nebula-man
 
 ---
 
-## Story 1 — Ulno, the networking teacher
+## Story 1 — Theprof, the networking teacher
 
-**Situation.** Ulno teaches a Nebula class. He already runs Nebula by hand:
+**Situation.** Theprof teaches a Nebula class. He already runs Nebula by hand:
 
 - a **lighthouse** on a VPS: `vps.theprof.mesh` = `10.100.0.1`, reachable at
   `vps.theprof.demo:4545`;
@@ -39,9 +39,9 @@ He does **not** use nebula-manager yet. He wants to: (a) import this setup,
 ```mermaid
 graph TD
   L["vps.theprof.mesh - lighthouse - 10.100.0.1:4545"]
-  U1["ulno-framework - 10.100.0.2"]
-  U3["ulno3 - 10.100.0.4"]
-  U4["ulno4 - 10.100.0.5"]
+  U1["theprof-framework - 10.100.0.2"]
+  U3["theprof3 - 10.100.0.4"]
+  U4["theprof4 - 10.100.0.5"]
   G1["student-group-1 - 10.101.0.0/24"]
   G2["student-group-2 - 10.102.0.0/24"]
   L --- U1
@@ -62,7 +62,7 @@ Detected a running Nebula installation:
   service:      nebula.service (active)
   nebula:       /usr/bin/nebula (v1.11.2)
   config:       /etc/nebula/config.yml   (service-owned; readable with sudo)
-  certs:        /home/ulno/keys/nebula   (CA: TheprofMeshCA, 3 certs)
+  certs:        /home/theprof/keys/nebula   (CA: TheprofMeshCA, 3 certs)
   tun:          nebula1 (10.100.0.2/24, up)
   lighthouse:   10.100.0.1 -> vps.theprof.demo:4545
   this host:    client (am_lighthouse: false)
@@ -71,10 +71,10 @@ Proposed nebula-manager.conf -> ~/.config/nebula-manager/nebula-manager.conf
 
   [global]
   bin_path=/usr/bin
-  cert_dir=/home/ulno/keys/nebula
+  cert_dir=/home/theprof/keys/nebula
   default_port=4545
 
-  [server.ulno-framework]
+  [server.theprof-framework]
   dir=/etc/nebula
   service=/etc/systemd/system/nebula.service
   enabled=true
@@ -100,7 +100,7 @@ nebula-manager config edit          # replace [server.nebula-example1] with your
 ### Phase 1 — Register the existing members (⚙️ planned helper)
 
 ```bash
-$ nebula-manager server add ulno-framework --dir /etc/nebula --service nebula.service
+$ nebula-manager server add theprof-framework --dir /etc/nebula --service nebula.service
 $ nebula-manager server add vps --role lighthouse --dir /etc/nebula --host vps.theprof.demo:4545
 $ nebula-manager cert list --cert-dir ~/keys/nebula
   Name                          Type  IPs            Groups
@@ -109,21 +109,21 @@ $ nebula-manager cert list --cert-dir ~/keys/nebula
   vps.theprof.mesh                 Cert  10.100.0.1/24  lighthouse,servers
 ```
 
-### Phase 2 — Add home machines ulno3 and ulno4 (mostly ✅ today)
+### Phase 2 — Add home machines theprof3 and theprof4 (mostly ✅ today)
 
 Sign certs unprivileged in the existing workspace:
 
 ```bash
 $ nebula-manager sign --cert-dir ~/keys/nebula \
-      --name ulno3.theprof.mesh --ip 10.100.0.4/24 --groups laptops
+      --name theprof3.theprof.mesh --ip 10.100.0.4/24 --groups laptops
 $ nebula-manager sign --cert-dir ~/keys/nebula \
-      --name ulno4.theprof.mesh --ip 10.100.0.5/24 --groups laptops
+      --name theprof4.theprof.mesh --ip 10.100.0.5/24 --groups laptops
 
-$ nebula-manager cert bundle ulno3.theprof.mesh ./bundles
-$ nebula-manager cert bundle ulno4.theprof.mesh ./bundles
+$ nebula-manager cert bundle theprof3.theprof.mesh ./bundles
+$ nebula-manager cert bundle theprof4.theprof.mesh ./bundles
 ```
 
-Each bundle (`./bundles/ulno3.theprof.mesh-nebula-bundle.zip`) contains the cert, key,
+Each bundle (`./bundles/theprof3.theprof.mesh-nebula-bundle.zip`) contains the cert, key,
 `ca.crt` and a `config.yml.template` (with `static_host_map`/`lighthouse.hosts`
 placeholders). He also edits the **firewall** so home machines can talk to each
 other without restrictions:
@@ -146,11 +146,11 @@ On each new machine (✅ today, manual):
 git clone https://github.com/<you>/nebula-manager    # brings ./nebula-manager + ./lib
 cd nebula-manager
 ./nebula-manager config init                         # create the tool config
-./nebula-manager config edit                         # add [server.ulno3] with dir/service
-unzip ~/ulno3.theprof.mesh-nebula-bundle.zip -d ~/nb
+./nebula-manager config edit                         # add [server.theprof3] with dir/service
+unzip ~/theprof3.theprof.mesh-nebula-bundle.zip -d ~/nb
 # install Nebula + place files (sudo only where needed):
 sudo install -d /etc/nebula
-sudo cp ~/nb/{ca.crt,ulno3.theprof.mesh.crt,ulno3.theprof.mesh.key} /etc/nebula/
+sudo cp ~/nb/{ca.crt,theprof3.theprof.mesh.crt,theprof3.theprof.mesh.key} /etc/nebula/
 sudo cp ~/nb/config.yml.template /etc/nebula/config.yml   # then edit static_host_map + lighthouse.hosts
 ./nebula-manager            # TUI -> Maintenance -> install/enable the service, then Toggle
 ./nebula-manager diag       # verify TUN ip, UDP socket, cert expiry
@@ -162,7 +162,7 @@ service, and runs `diag` — elevating only for the individual system steps.
 
 ### Phase 3 — Two student groups of three machines (⚙️ planned "profiles")
 
-Ulno wants two isolated class networks and a ready-to-hand-out collection per
+Theprof wants two isolated class networks and a ready-to-hand-out collection per
 group. ⚙️ Proposed:
 
 ```bash
@@ -204,7 +204,7 @@ portable install/README. This is essentially `cert bundle` × N + shared assets.
 
 Names: **Alex** (Windows 11), **Bianca** (Linux/Fedora), **Chen** (macOS).
 Each receives `student-group-1/<their>-nebula-bundle.zip` (or the whole folder)
-from Ulno.
+from Theprof.
 
 ### Bianca — Linux ✅ (fully scriptable)
 
