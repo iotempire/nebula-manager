@@ -50,6 +50,18 @@ summary="$(cert_group_summary "$keys")"
 assert_contains "group summary lists a real group" "$summary" "laptops (3)"
 assert_contains "group summary lists another group" "$summary" "admin (1)"
 
+# --- group picker used by the batch editor --------------------------------
+# Selecting a cert first and then opening the picker must not lose the
+# selection (the picker scans the workspace without touching SEL_*).
+cert_select "$keys" --select group:laptops >/dev/null 2>&1
+sel_before="$(sel_names)"
+out="$(pki_pick_group "Pick group" "Pick a group:" <<< $'1' 2>"$SANDBOX/pick.err")"
+assert_eq "picker returns the most-used group" "$out" "laptops"
+assert_contains "picker shows member counts" "$(cat "$SANDBOX/pick.err")" "laptops (3 certificate(s))"
+assert_eq "picker leaves the cert selection untouched" "$(sel_names)" "$sel_before"
+out="$(pki_pick_group "Pick group" "Pick a group:" <<< $'custom-group' 2>/dev/null)"
+assert_eq "picker accepts a typed group name" "$out" "custom-group"
+
 # The filter prompt must describe THIS workspace, not the documentation story.
 prompt="$(cert_select_filter_prompt "$keys")"
 assert_contains "filter prompt shows the workspace" "$prompt" "Certificate workspace: $keys"
@@ -154,6 +166,15 @@ pki_group_apply "$keys" >/dev/null 2>&1
 assert_eq "move: alpha now home,admin" "$(groups_of "$keys/alpha.mesh.crt")" "home,admin"
 assert_eq "move: beta now home"        "$(groups_of "$keys/beta.mesh.crt")" "home"
 assert_eq "move: delta deduplicated"   "$(groups_of "$keys/delta.mesh.crt")" "home"
+# Re-signing must never produce a cert that outlives its CA (nebula-cert
+# rejects that), even when the original cert used the CA's full lifetime.
+ca_epoch="$(date -d "$(nebula_cert_json "$BIN_PATH" "$keys/ca.crt" | jq -r '.details.notAfter')" +%s)"
+alpha_epoch="$(date -d "$(nebula_cert_json "$BIN_PATH" "$keys/alpha.mesh.crt" | jq -r '.details.notAfter')" +%s)"
+if (( alpha_epoch <= ca_epoch )); then
+    _ok "re-signed cert does not outlive the CA"
+else
+    _bad "re-signed cert does not outlive the CA" "cert=$alpha_epoch ca=$ca_epoch"
+fi
 plan --select group:laptops -- move laptops home
 assert_eq "move: no laptops left" "$PLAN_RC" "1"
 
@@ -268,9 +289,11 @@ fi
 # add 'tuigroup2' -> confirm -> stop. The second action also proves the
 # selection is refreshed from disk after the first re-sign.
 printf 'group:laptops\n\n1\ntuigroup\ny\ny\n1\ntuigroup2\ny\nn\n' \
-    | pki_group_edit_tui >/dev/null 2>&1
+    | pki_group_edit_tui >/dev/null 2>"$SANDBOX/edit.err"
 assert_eq "TUI batch add applied twice (selection refreshed)" \
     "$(groups_of "$keys/epsilon.mesh.crt")" "laptops,tuigroup,tuigroup2"
+assert_contains "batch menu lists the workspace groups" "$(cat "$SANDBOX/edit.err")" "Groups in workspace:"
+assert_not_contains "batch menu drops the obsolete group list item" "$(cat "$SANDBOX/edit.err")" "Show the current groups"
 
 # --- safety -----------------------------------------------------------------
 assert_eq "no sudo used anywhere" "$(sudo_count)" "0"

@@ -167,23 +167,21 @@ _ipv4_network() {
 }
 
 # cert_group_counts [cert_dir] ; "group<TAB>cert-count", most-used first.
+# Scans the certificates directly (instead of going through cert_select) so it
+# never clobbers the caller's SEL_* selection.
 cert_group_counts() {
-    local cert_dir="${1:-$(resolve_cert_dir)}" f have=0 i g
+    local cert_dir="${1:-$(resolve_cert_dir)}" cert json bin bin_path
     [[ -d "$cert_dir" ]] || return 0
-    for f in "$cert_dir"/*.crt; do [[ -f "$f" ]] && { have=1; break; }; done
-    (( have )) || return 0
-    declare -F cert_select >/dev/null || return 0
-    cert_select "$cert_dir" --select all >/dev/null 2>&1 || return 0
-    (
-        local IFS=','
-        for i in "${!SEL_GROUPS[@]}"; do
-            for g in ${SEL_GROUPS[i]}; do
-                g="${g#"${g%%[![:space:]]*}"}"
-                g="${g%"${g##*[![:space:]]}"}"
-                [[ -n "$g" ]] && printf '%s\n' "$g"
-            done
-        done
-    ) | sort | uniq -c | sort -k1,1nr -k2,2 | awk '{ print $2 "\t" $1 }'
+    declare -F pki_cert_bin >/dev/null || return 0
+    bin="$(pki_cert_bin 2>/dev/null)" || return 0
+    bin_path="$(dirname "$bin")"
+    for cert in "$cert_dir"/*.crt; do
+        [[ -f "$cert" ]] || continue
+        json="$(nebula_cert_json "$bin_path" "$cert" 2>/dev/null)" || continue
+        [[ -n "$json" ]] || continue
+        [[ "$(jq -r '.details.isCa // false' <<<"$json" 2>/dev/null)" == "true" ]] && continue
+        jq -r '.details.groups // [] | .[]' <<<"$json" 2>/dev/null
+    done | sort | uniq -c | sort -k1,1nr -k2,2 | awk 'NF { print $2 "\t" $1 }'
 }
 
 # cert_group_summary [cert_dir] ; compact "group (count), …" line.

@@ -227,7 +227,11 @@ groups and overlay networks, with counts** (e.g. `Groups: home (3), admin (1)`,
 `name:GLOB`, `ip:CIDR`). Unions and exclusions are supported; an invalid filter
 offers to retry;
 2. confirm the matches in a **checkbox list** (all pre-selected; space toggles);
-3. pick an **action**: add, remove, move, set or rename;
+3. pick an **action**: add, remove, move, set or rename. The workspace's
+   groups are listed with member counts both in the action menu and in every
+   group prompt — pick one by number or type a new name, so you never have to
+   recall exact group names. (The former "Show the current groups" entry is
+   gone because the list is now always visible.)
 4. review the exact per-certificate diff and confirm;
 5. optionally apply **another action to the same selection** (e.g. add `home`,
    then also add `admin`).

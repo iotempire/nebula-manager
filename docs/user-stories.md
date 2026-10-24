@@ -316,7 +316,8 @@ one action. Rename is just one of the actions.
 
 1. filter `group:laptops`; confirm the three matches (the VPS is absent because
    it never carried `laptops`);
-2. action **rename** `laptops` → `home`;
+2. action **rename** — pick `laptops` from the listed workspace groups (or
+   type it), then enter `home`;
 3. the preview lists exactly which certificates change and which do not:
 
    ```text

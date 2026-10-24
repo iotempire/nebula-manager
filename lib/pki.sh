@@ -1799,11 +1799,18 @@ pki_group_apply() {
         log_warn "Nothing to re-sign - run pki_group_scan first."
         return 1
     fi
-    local bin bin_path ca_crt ca_key
+    local bin bin_path ca_crt ca_key ca_na ca_epoch
     bin="$(pki_cert_bin)" || return 1
     bin_path="$(dirname "$bin")"
     ca_crt="$(find_ca_crt "$cert_dir")" || { log_error "CA certificate not found in $cert_dir"; return 1; }
     ca_key="$(find_ca_key "$cert_dir")" || { log_error "CA key not found in $cert_dir"; return 1; }
+    # A re-signed certificate must not outlive its CA. Reading the CA expiry
+    # lets us clamp the preserved duration instead of letting nebula-cert fail
+    # with "certificate expires after signing certificate" when the original
+    # cert was issued with the CA's full lifetime.
+    ca_na="$(nebula_cert_json "$bin_path" "$ca_crt" 2>/dev/null | jq -r '.details.notAfter // empty' 2>/dev/null)"
+    ca_epoch=0
+    [[ -n "$ca_na" ]] && ca_epoch="$(date -d "$ca_na" +%s 2>/dev/null || echo 0)"
 
     debug_explain "Re-signing ${#PKI_RENAME_FILES[@]} certificate(s) for group action '${PKI_GROUP_ACTION:-resign}'."
     debug_explain "Groups are embedded in the certificate, so it must be re-issued. Name, networks, subnets and expiry are preserved; device private keys are not touched."
@@ -1831,7 +1838,7 @@ pki_group_apply() {
         asroot=(elevate)
         ELEVATE_REASON="re-sign certificates and write backups in $cert_dir"
     fi
-    local i crt json name ips subnets newgroups na epoch_na secs bak out_tmp
+    local i crt json name ips subnets newgroups na target_epoch secs bak out_tmp
     local ok=0 failed=0
     for i in "${!PKI_RENAME_FILES[@]}"; do
         crt="${PKI_RENAME_FILES[i]}"
@@ -1850,10 +1857,17 @@ pki_group_apply() {
         local -a args=("$bin" sign -name "$name" -networks "$ips"
             -groups "$newgroups" -ca-crt "$ca_crt" -ca-key "$ca_key")
         [[ -n "$subnets" ]] && args+=(-unsafe-networks "$subnets")
-        # Preserve the original expiry: re-signing must not silently extend it.
-        if [[ -n "$na" ]]; then
-            epoch_na="$(date -d "$na" +%s 2>/dev/null || echo 0)"
-            secs=$(( epoch_na - $(date +%s) ))
+        # Preserve the original expiry, but never outlive the CA. Nebula rejects
+        # a certificate whose notAfter is later than the CA's; a 5-second margin
+        # absorbs same-second rounding when the original cert used the CA's
+        # lifetime (which otherwise fails intermittently).
+        target_epoch=0
+        [[ -n "$na" ]] && target_epoch="$(date -d "$na" +%s 2>/dev/null || echo 0)"
+        if (( ca_epoch > 0 && (target_epoch == 0 || ca_epoch < target_epoch) )); then
+            target_epoch="$ca_epoch"
+        fi
+        if (( target_epoch > 0 )); then
+            secs=$(( target_epoch - $(date +%s) - 5 ))
             if (( secs <= 0 )); then
                 log_error "Skipping $(basename "$crt"): certificate already expired."
                 failed=$((failed+1)); continue
@@ -1900,11 +1914,10 @@ pki_group_apply() {
 pki_rename_group_tui() {
     local cert_dir; cert_dir="$(resolve_cert_dir)"
     ensure_cert_dir >/dev/null || return 1
-    local old new available=""
-    declare -F cert_group_summary >/dev/null && available="$(cert_group_summary "$cert_dir")"
-    old="$(ui_input "Rename group" "Group to rename${available:+ (available: $available)}:")" || { log_info "Canceled."; return 0; }
+    local old new
+    old="$(pki_pick_group "Rename group" "Group to rename (pick or type):")" || { log_info "Canceled."; return 0; }
     [[ -z "$old" ]] && { log_info "Canceled."; return 0; }
-    new="$(ui_input "Rename group" "New group name:")" || { log_info "Canceled."; return 0; }
+    new="$(pki_pick_group "Rename group" "New group name (pick or type):")" || { log_info "Canceled."; return 0; }
     [[ -z "$new" ]] && { log_info "Canceled."; return 0; }
     if [[ "$old" == "$new" ]]; then
         log_warn "Old and new group names are identical - nothing to do."
@@ -1925,6 +1938,36 @@ pki_rename_group_tui() {
     pki_group_apply "$cert_dir"
 }
 
+# pki_pick_group <title> <prompt> [default]
+# Show every group in the workspace (with member counts) so batch actions do not
+# require recalling names. Plain mode also accepts a typed group name; curses
+# offers an explicit "Type another group name…" entry. Prints the group name.
+pki_pick_group() {
+    local title="$1" prompt="$2" default="${3:-}"
+    local cert_dir; cert_dir="$(resolve_cert_dir)"
+    local counts g c
+    counts="$(cert_group_counts "$cert_dir")"
+    local -a pairs=()
+    if [[ -n "$counts" ]]; then
+        while IFS=$'\t' read -r g c; do
+            [[ -n "$g" ]] || continue
+            pairs+=( "$g" "$g ($c certificate(s))" )
+        done <<< "$counts"
+    fi
+    if (( ${#pairs[@]} == 0 )); then
+        ui_input "$title" "$prompt" "$default"
+        return
+    fi
+    pairs+=( "__other__" "Type another group name…" )
+    local choice
+    choice="$(ui_menu_or_text "$title" "$prompt" "${pairs[@]}")" || return 1
+    case "$choice" in
+        text:*)     choice="${choice#text:}" ;;
+        __other__)  choice="$(ui_input "$title" "$prompt" "$default")" || return 1 ;;
+    esac
+    printf '%s' "$choice"
+}
+
 # Interactive TUI entry: Certificates > Edit Groups (Batch).
 pki_group_edit_tui() {
     local cert_dir; cert_dir="$(resolve_cert_dir)"
@@ -1932,36 +1975,31 @@ pki_group_edit_tui() {
     if ! cert_select_tui "$cert_dir"; then
         return 0
     fi
-    local count="${#SEL_FILES[@]}" action a b summary preview rc n
+    local count="${#SEL_FILES[@]}" action a b summary preview rc n group_summary
     while true; do
-        action="$(ui_menu "Edit groups" "Action for ${count} selected certificate(s):" \
+        group_summary="$(cert_group_summary "$cert_dir")"
+        [[ -n "$group_summary" ]] || group_summary="(none yet)"
+        action="$(ui_menu "Edit groups" "Action for ${count} selected certificate(s):
+Groups in workspace: ${group_summary}" \
             add    "Add a group" \
             remove "Remove a group" \
             move   "Move a group (add B, remove A)" \
             set    "Replace the whole group list" \
-            rename "Rename a group (replace A with B)" \
-            list   "Show the current groups")" || return 0
+            rename "Rename a group (replace A with B)")" || return 0
         a=""; b=""; summary=""
         case "$action" in
-            list)
-                local i
-                for i in "${!SEL_FILES[@]}"; do
-                    printf '  %-36s [%s]\n' "$(basename "${SEL_FILES[i]}")" "${SEL_GROUPS[i]:-}"
-                done
-                continue
-                ;;
             add)
-                a="$(ui_input "Add group" "Group to add:")" || return 0 ;;
+                a="$(pki_pick_group "Add group" "Group to add (pick or type a new name):")" || return 0 ;;
             remove)
-                a="$(ui_input "Remove group" "Group to remove:")" || return 0 ;;
+                a="$(pki_pick_group "Remove group" "Group to remove (pick or type):")" || return 0 ;;
             move)
-                a="$(ui_input "Move group" "Group to remove:")" || return 0
+                a="$(pki_pick_group "Move group" "Group to remove (pick or type):")" || return 0
                 [[ -z "$a" ]] && { log_info "Canceled."; return 0; }
-                b="$(ui_input "Move group" "Group to add (replaces '$a'):")" || return 0 ;;
+                b="$(pki_pick_group "Move group" "Group to add (replaces '$a'; pick or type):")" || return 0 ;;
             rename)
-                a="$(ui_input "Rename group" "Old group:")" || return 0
+                a="$(pki_pick_group "Rename group" "Old group (pick or type):")" || return 0
                 [[ -z "$a" ]] && { log_info "Canceled."; return 0; }
-                b="$(ui_input "Rename group" "New group name:")" || return 0 ;;
+                b="$(pki_pick_group "Rename group" "New group name (pick or type):")" || return 0 ;;
             set)
                 a="$(ui_input "Set groups" "New group list (comma-separated, empty clears):")" || return 0 ;;
         esac
