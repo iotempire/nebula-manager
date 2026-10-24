@@ -486,6 +486,29 @@ running Nebula), *Import client bundle* (install a `.zip`/`.tar.gz` produced by
 then *Manage instances* to add your instances and *Reload & continue* to enter
 the main menu.
 
+#### Moving around the menus
+
+The plain menus accept more than numbers:
+
+| Key | Action |
+|---|---|
+| `1`…`N` | select an entry |
+| **Enter** | default: **Back** in a submenu, **Exit** on the main menu (the bold entry) |
+| `b`, `back`, `..` | back one menu |
+| `m`, `main` | jump straight to the main menu |
+| `q`, `quit` | exit at the top level; back in a submenu |
+| `/keyword` | search every menu — e.g. `/firewall`, `/dns`, `/ca`, `/nodes` |
+| `/` | ask for a search keyword |
+| `?` | show these keys |
+
+Every menu prints a one-line purpose/hint; the search also matches those hints
+and extra synonyms (`nodes`, `machines`, `systemd`, `pki`, …). Top-level entries
+carry a short reminder in brackets, e.g. *Certificates (CA, nodes, groups)*.
+
+Nomenclature used throughout: **nodes** are mesh members (their certificates),
+**instances** are local Nebula installations/services, and the **workspace** is
+the certificate store.
+
 Handy extras: menus are **plain numbered** by default (easy to script and debug);
 file/directory browsing automatically uses `whiptail` when it is installed.
 `NEBULA_UI=whiptail nebula-manager` forces the curses UI for the menus too.

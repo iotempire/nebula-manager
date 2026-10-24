@@ -107,7 +107,8 @@ nebula_maintenance() {
     dynamic_menu_title=("$MENU_PATH" "Updates & Install")
     dynamic_menu_options=("$(get_icon 'download')Update Nebula" "$(get_icon 'schedule')Auto-Update Scheduler" "$(get_icon 'install')Install Script to System" "$(get_icon 'uninstall')${ORANGE}Remove Nebula${RESET}")
     dynamic_menu_functions=("check_for_nebula_update" "auto_update_cron_menu" "ensure_installed_to_bin_path" "remove_nebula")
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+        "Nebula binary updates, auto-update schedule, install/remove this tool."
 }
 
 # --- TUI glue for the CLI capabilities (Instances / Setup / Diagnostics) ------
@@ -152,7 +153,8 @@ server_menu() {
     dynamic_menu_title=("$MENU_PATH" "Nebula Instances")
     dynamic_menu_options=("$(get_icon 'list')List Instances" "$(get_icon 'create')Add Instance" "$(get_icon 'edit')Enable / Disable Instance" "$(get_icon 'start')Service: Start / Stop" "$(get_icon 'delete')Remove Instance")
     dynamic_menu_functions=("server_list" "server_add_tui" "server_toggle_tui" "toggle_nebula_service" "server_remove_tui")
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+        "Local Nebula installations and their systemd services (start/stop/restart)."
 }
 
 config_init_tui() {
@@ -239,7 +241,8 @@ setup_menu() {
     SETUP_MENU_BOOTSTRAP=0
     _setup_menu_build 0
     dynamic_menu_title=("$MENU_PATH" "Manager Setup")
-    dynamic_menu dynamic_menu_title _SETUP_OPTS _SETUP_FNS 1 _setup_menu_refresh
+    dynamic_menu dynamic_menu_title _SETUP_OPTS _SETUP_FNS 1 _setup_menu_refresh \
+        "Import, create or browse the manager config; install a client bundle; pick the cert workspace."
     unset SETUP_MENU_BOOTSTRAP
 }
 
@@ -247,9 +250,13 @@ bootstrap_menu() {
     SETUP_MENU_BOOTSTRAP=1
     _setup_menu_build 1
     dynamic_menu_title=("$MENU_PATH" "Manager Setup")
-    dynamic_menu dynamic_menu_title _SETUP_OPTS _SETUP_FNS 0 _setup_menu_refresh
+    dynamic_menu dynamic_menu_title _SETUP_OPTS _SETUP_FNS 0 _setup_menu_refresh \
+        "First run: import this host, import a client bundle, or create/browse a manager config."
     unset SETUP_MENU_BOOTSTRAP
 }
+
+# Zero-argument wrapper so the "/validate" index entry works outside a menu.
+validate_config_tui() { check_nebula_config "${NEBULA_DIR}/config.yml" "error"; }
 
 main_menu() {
     if check_nebula_installed; then
@@ -259,14 +266,15 @@ main_menu() {
         if [ ! -f "${NEBULA_DIR}/config.yml" ]; then
             setup_nebula_config
         fi
-        menu_options=("$(get_icon 'certificate')Certificates" "$(get_icon 'list')Instances" "$(get_icon 'configuration')Instance Settings" "$(get_icon 'connectivity')Connectivity" "$(get_icon 'scan')Diagnostics" "$(get_icon 'bench')Benchmarks" "$(get_icon 'download')Manager Setup" "$(get_icon 'maintenance')Updates & Install" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_options=("$(get_icon 'certificate')Certificates (CA, nodes, groups)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'configuration')Instance Settings (config, firewall, DNS)" "$(get_icon 'connectivity')Connectivity (ping nodes)" "$(get_icon 'scan')Diagnostics (TUN, port, expiry)" "$(get_icon 'bench')Benchmarks (iperf3)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'maintenance')Updates & Install (Nebula binary)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
         menu_option_functions=("manage_nebula_certs" "server_menu" "manage_configuration" "check_node_connectivity" "run_diagnostics_tui" "run_benchmark" "setup_menu" "nebula_maintenance" "exit")
     else
-        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'list')Instances" "$(get_icon 'download')Manager Setup" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'list')Instances (local services)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
         menu_option_functions=("install_nebula" "server_menu" "setup_menu" "exit")
     fi
     menu_title=("$MENU_PATH")
-    dynamic_menu menu_title menu_options menu_option_functions 0 instance_context_refresh
+    dynamic_menu menu_title menu_options menu_option_functions 0 instance_context_refresh \
+        "Type a number; Enter = Exit; /keyword = search all menus (e.g. /firewall); ? = help"
 }
 
 tui_main() {

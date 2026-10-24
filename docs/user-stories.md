@@ -45,6 +45,12 @@ on this host (Nebula installed? a config already present? cert workspace?) befor
 offering to import, create or browse for one. The command lines shown in the
 phases below are the **expert/automation** equivalents of the same menus.
 
+Navigating the plain menus: **Enter** takes the default (bold **Back**/**Exit**),
+`b`/`back`/`..` goes back, `m` jumps to the main menu, and `/firewall` (or any
+keyword) searches all menus. `?` shows the keys. Top-level entries carry a short
+reminder, e.g. *Certificates (CA, nodes, groups)* — **nodes** are mesh members,
+**instances** are local Nebula services.
+
 ---
 
 ## Story 1 — Theprof, the networking teacher

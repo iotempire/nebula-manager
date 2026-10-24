@@ -2384,8 +2384,9 @@ manage_firewall() {
         echo -e "        ${BOLD}${YELLOW}5.${RESET} $(get_icon 'inspect')Show the effective policy (read-only)"
         echo -e "        ${BOLD}${YELLOW}6.${RESET} $(get_icon 'package')Policy packs (create / apply / export)"
         echo -e "        ${BOLD}${YELLOW}7.${RESET} $(get_icon 'back')${BOLD}Go Back${RESET}"
-        read -p "$(show_status 'question') Choose an option [1-7]: " choice
+        read -p "$(show_status 'question') Choose an option [1-7, Enter=Back]: " choice
         case "$choice" in
+            ""|b|B|back|Back|BACK|..|q|Q|quit|Quit|QUIT) break ;;
             1) configure_inbound_rules ;;
             2) configure_outbound_rules ;;
             3) configure_firewall_settings ;;
@@ -3004,5 +3005,6 @@ manage_configuration() {
     dynamic_menu_title=("$MENU_PATH" "Instance Settings")
     dynamic_menu_options=("$(get_icon 'validate')Validate Config" "$(get_icon 'configuration')Edit Config" "$(get_icon 'firewall')Edit Firewall" "$(get_icon 'connectivity')Name resolution (Nebula DNS)")
     dynamic_menu_functions=("check_nebula_config \"$NEBULA_DIR/config.yml\" \"error\"" "edit_nebula_config" "manage_firewall" "manage_name_resolution")
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 instance_context_refresh
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 instance_context_refresh \
+        "This instance's config.yml: validate, edit, firewall rules (in/out), Nebula DNS."
 }

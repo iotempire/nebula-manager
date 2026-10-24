@@ -850,6 +850,103 @@ _ui_label_clean() {
         | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
+# --- plain-menu navigation helpers -----------------------------------------
+# Search index used by the "/term" jump. Each entry is
+#   <path>|<extra keywords>|<zero-argument command/function>
+# Path is what the user sees, keywords are searchable synonyms, and the target
+# is what runs when the match is chosen. Keep it in sync when adding menus.
+menu_search_index() {
+    cat <<'EOF'
+Certificates|ca cert certificate sign revoke keys pki nodes machines groups workspace bundle|manage_nebula_certs
+Certificates ▸ List Certificates|list show certs certificates nodes machines|list_certs
+Certificates ▸ Generate CA Certificate|ca create authority pki|generate_nebula_ca
+Certificates ▸ Generate Client Certificate|sign create node machine client certificate|generate_nebula_cert
+Certificates ▸ Rename Group|rename group cert certificate|pki_rename_group_tui
+Certificates ▸ Edit Groups (Batch)|groups batch add remove move set rename certificates|pki_group_edit_tui
+Certificates ▸ View Certificate Details|view details inspect show cert certificate|view_cert_details
+Certificates ▸ Certificate Expiry|expiry expiration renew cert certificate|list_certs_expiry
+Certificates ▸ Bundle / Export Client|bundle export zip client certificate|pki_bundle_client_menu
+Certificates ▸ Revoke Certificate|revoke blocklist cert certificate|revoke_cert
+Certificates ▸ Switch Workspace|workspace cert dir keys store|select_cert_workspace
+Certificates ▸ Store Backup / Git|backup git history store cert|cert_store_menu
+Instances|servers instances service systemd start stop restart|server_menu
+Instances ▸ List|list servers instances|server_list
+Instances ▸ Add|add server instance|server_add_tui
+Instances ▸ Enable / Disable|enable disable server instance|server_toggle_tui
+Instances ▸ Service Start / Stop|start stop restart service systemd|toggle_nebula_service
+Instances ▸ Remove|remove delete server instance|server_remove_tui
+Instance Settings|config yaml settings validate edit firewall dns|manage_configuration
+Instance Settings ▸ Validate Config|validate test check config|validate_config_tui
+Instance Settings ▸ Edit Config|edit config yaml settings|edit_nebula_config
+Instance Settings ▸ Edit Firewall|firewall rules inbound outbound ports groups|manage_firewall
+Instance Settings ▸ Name Resolution|dns name resolution resolvectl|manage_name_resolution
+Connectivity|ping connectivity reachability nodes machines|check_node_connectivity
+Diagnostics|diag tun udp port expiry certificate|run_diagnostics_tui
+Benchmarks|bench iperf iperf3 bandwidth speed|run_benchmark
+Manager Setup|setup import bundle config workspace manager|setup_menu
+Updates & Install|update upgrade install uninstall nebula maintenance|nebula_maintenance
+EOF
+}
+
+_menu_contains() { [[ "${2,,}" == *"${1,,}"* ]]; }
+
+# Print "path<TAB>target" for index entries matching <term>.
+_menu_global_matches() {
+    local term="$1" path kw target
+    while IFS='|' read -r path kw target; do
+        [[ -n "$path" ]] || continue
+        if _menu_contains "$term" "$path" || _menu_contains "$term" "$kw" || _menu_contains "$term" "$target"; then
+            printf '%s\t%s\n' "$path" "$target"
+        fi
+    done < <(menu_search_index)
+}
+
+_menu_help() {
+    cat <<'EOF'
+Plain-menu keys
+  1..N            select an entry
+  Enter           default action (Back; Exit at the top level)
+  b, back, ..     go back one menu
+  m, main         jump to the main menu
+  q, quit         exit (top level) / go back (submenu)
+  /keyword        search all menus (e.g. /firewall)
+  /               ask for a search keyword
+  ?               show this help
+EOF
+}
+
+# Present matches and run the chosen one. Returns 0 after running something,
+# 1 when the user cancelled / nothing matched.
+_menu_search_pick() {
+    local term="$1"; shift
+    local -a paths=() targets=()
+    local p t
+    # Remaining args are alternating path/target pairs.
+    while (( $# >= 2 )); do
+        paths+=("$1"); targets+=("$2"); shift 2
+    done
+    if (( ${#paths[@]} == 0 )); then
+        echo "No menu entry matches '$term'."
+        return 1
+    fi
+    echo "Matches for '$term':"
+    local i
+    for i in "${!paths[@]}"; do
+        printf '  %d. %s\n' "$((i + 1))" "${paths[i]}"
+    done
+    printf '  0. Cancel\n'
+    local sel
+    read -rp "Select [1-${#paths[@]}, Enter=1]: " sel || return 1
+    [[ -z "$sel" ]] && sel=1
+    [[ "$sel" == "0" ]] && return 1
+    if [[ ! "$sel" =~ ^[0-9]+$ ]] || (( sel < 1 || sel > ${#paths[@]} )); then
+        echo "Invalid selection."
+        return 1
+    fi
+    eval "${targets[$((sel - 1))]}"
+    return 0
+}
+
 # Function to dynamically build option menus. Renders a text-graphical menu
 # (whiptail/dialog) when one is available, otherwise a plain numbered menu.
 # Force the numbered menu with NEBULA_UI=plain.
@@ -861,12 +958,20 @@ _ui_label_clean() {
 # installed? cert workspace?) and update it live as actions run. Note: freshness
 # is scoped per invocation - nested menus (which pass no refresh) ignore any
 # DYNAMIC_MENU_PROMPT left over from an outer menu.
+#
+# The optional 6th argument is a one-line hint shown under the header (plain)
+# or as the first prompt line (curses). Searchable synonyms for each menu live
+# in menu_search_index() above.
+#
+# Plain-mode keys: Enter = Back (or Exit at the top level), b/back/.. = back,
+# m/main = main menu, q/quit = exit/back, /term = search all menus, ? = help.
 dynamic_menu() {
     local -n title_parts="$1"
     local -n labels="$2"
     local -n actions="$3"
     local depth="${4:-0}"  # Default to 0 if not passed
     local refresh="${5:-}"
+    local hint="${6:-}"
     local backend; backend="$(ui_backend)"
     local indent=" " i choice
     for ((i = 0; i < depth; i++)); do
@@ -883,6 +988,7 @@ dynamic_menu() {
         if [[ "$backend" != "plain" ]]; then
             # ---- text-graphical menu ----
             [[ -z "$prompt" ]] && prompt="Choose an option"
+            [[ -n "$hint" ]] && prompt="$hint"$'\n'"$prompt"
             local -a pairs=()
             for i in "${!labels[@]}"; do
                 pairs+=( "$((i + 1))" "$(_ui_label_clean "${labels[$i]}")" )
@@ -895,10 +1001,15 @@ dynamic_menu() {
             # A reload request unwinds every nested menu back to tui_main(), which
             # owns the flag and clears it there.
             [[ "${TUI_RESTART:-0}" == 1 ]] && return 0
+            if [[ "${TUI_JUMP_MAIN:-0}" == 1 ]]; then
+                (( depth > 0 )) && return 0
+                TUI_JUMP_MAIN=0
+            fi
             read -rp "$(show_status 'question') Press Enter to continue..." _ 2>/dev/null || true
         else
             # ---- plain numbered menu ----
             show_menu_header "${title_parts[@]}"
+            [[ -n "$hint" ]] && printf "${CYAN}%s${RESET}\n" "$hint"
             [[ -n "$prompt" ]] && printf '%b\n' "$prompt"
             for i in "${!labels[@]}"; do
                 printf "${indent}${BOLD}${YELLOW}%d.${RESET} %b\n" "$((i + 1))" "${labels[$i]}"
@@ -908,15 +1019,89 @@ dynamic_menu() {
                 ((max_choice++))
                 printf "${indent}${BOLD}${YELLOW}%d.${RESET} $(get_icon 'back')${BOLD}Go Back${RESET}\n" "$max_choice"
             fi
-            read -p "${indent}$(show_status 'question') Choose an option [1-$max_choice]: " choice || { printf '\n'; break; }
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#labels[@]} )); then
-                eval "${actions[$((choice - 1))]}"
-                [[ "${TUI_RESTART:-0}" == 1 ]] && break
-            elif (( depth > 0 && choice == max_choice )); then
-                break
+
+            # Enter with no input selects the bold Back/Exit entry.
+            local default_choice="" enter_label=""
+            if (( depth > 0 )); then
+                default_choice="$max_choice"; enter_label="Back"
             else
-                echo -e "${indent}$(show_status 'error') ${RED}Invalid option. Please choose again.${RESET}"
+                for i in "${!labels[@]}"; do
+                    if [[ "${actions[$i]}" == "exit" ]] || [[ "$(_ui_label_clean "${labels[$i]}")" == *[Ee]xit* ]]; then
+                        default_choice=$((i + 1)); enter_label="Exit"; break
+                    fi
+                done
             fi
+            local enter_hint=""
+            [[ -n "$enter_label" ]] && enter_hint=", Enter=$enter_label"
+            read -p "${indent}$(show_status 'question') Choose an option [1-$max_choice${enter_hint}, /=search, ?=help]: " choice \
+                || { printf '\n'; break; }
+
+            case "$choice" in
+                "")
+                    if [[ -z "$default_choice" ]]; then break; fi
+                    if (( depth > 0 && default_choice == max_choice )); then break; fi
+                    eval "${actions[$((default_choice - 1))]}"
+                    [[ "${TUI_RESTART:-0}" == 1 ]] && break
+                    if [[ "${TUI_JUMP_MAIN:-0}" == 1 ]]; then
+                        (( depth > 0 )) && break
+                        TUI_JUMP_MAIN=0
+                    fi
+                    ;;
+                b|B|back|Back|BACK|..) break ;;
+                q|Q|quit|Quit|QUIT)
+                    if (( depth == 0 )); then eval "exit"; else break; fi ;;
+                m|M|main|Main|MAIN)
+                    if (( depth > 0 )); then TUI_JUMP_MAIN=1; break; fi ;;
+                '?') _menu_help ;;
+                /*)
+                    local term="${choice#/}"
+                    if [[ -z "$term" ]]; then
+                        read -rp "${indent}$(show_status 'question') Search all menus for: " term \
+                            || { printf '\n'; break; }
+                    fi
+                    [[ -z "$term" ]] && continue
+                    local -a paths=() targets=() seen=()
+                    local lbl
+                    for i in "${!labels[@]}"; do
+                        lbl="$(_ui_label_clean "${labels[$i]}")"
+                        if _menu_contains "$term" "$lbl" || _menu_contains "$term" "${actions[$i]}"; then
+                            paths+=( "${title_parts[*]} ▸ $lbl" )
+                            targets+=( "${actions[$i]}" )
+                            seen+=( "${actions[$i]}" )
+                        fi
+                    done
+                    local gpath gtarget s dup
+                    while IFS=$'\t' read -r gpath gtarget; do
+                        [[ -n "$gpath" ]] || continue
+                        dup=0
+                        for s in "${seen[@]}"; do [[ "$s" == "$gtarget" ]] && { dup=1; break; }; done
+                        (( dup )) && continue
+                        paths+=( "$gpath" ); targets+=( "$gtarget" ); seen+=( "$gtarget" )
+                    done < <(_menu_global_matches "$term")
+                    local -a pairs=()
+                    for i in "${!paths[@]}"; do pairs+=( "${paths[i]}" "${targets[i]}" ); done
+                    _menu_search_pick "$term" "${pairs[@]}" || true
+                    [[ "${TUI_RESTART:-0}" == 1 ]] && break
+                    if [[ "${TUI_JUMP_MAIN:-0}" == 1 ]]; then
+                        (( depth > 0 )) && break
+                        TUI_JUMP_MAIN=0
+                    fi
+                    ;;
+                *)
+                    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#labels[@]} )); then
+                        eval "${actions[$((choice - 1))]}"
+                        [[ "${TUI_RESTART:-0}" == 1 ]] && break
+                        if [[ "${TUI_JUMP_MAIN:-0}" == 1 ]]; then
+                            (( depth > 0 )) && break
+                            TUI_JUMP_MAIN=0
+                        fi
+                    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( depth > 0 && choice == max_choice )); then
+                        break
+                    else
+                        echo -e "${indent}$(show_status 'error') ${RED}Invalid option. Please choose again (/? for help).${RESET}"
+                    fi
+                    ;;
+            esac
         fi
     done
 }
