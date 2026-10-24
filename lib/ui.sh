@@ -263,10 +263,20 @@ maxlen() {
 
 # Function to display the banner
 banner() {
+    local version="v${MANAGER_VERSION:-${VERSION:-dev}}"
+    local credit="ulno's academic spin - orig: Jordan Hillis"
+    # Keep the version right-aligned inside the credit bar: match the art width
+    # (58 cols) when it fits, otherwise widen the bar and keep >= 3 spaces.
+    local width=58
+    local line_width=$(( 2 + ${#credit} + 3 + ${#version} + 2 ))
+    (( line_width > width )) || line_width="$width"
+    local gap=$(( line_width - 2 - ${#credit} - ${#version} - 2 ))
+    (( gap < 3 )) && gap=3
+    local pad; printf -v pad '%*s' "$gap" ''
     echo -e "${BG_BLACK}${GREEN}  ░█▀█░█▀▀░█▀▄░█░█░█░░░█▀█░░░█▄█░█▀█░█▀█░█▀█░█▀▀░█▀▀░█▀▄  
   ░█░█░█▀▀░█▀▄░█░█░█░░░█▀█░░░█░█░█▀█░█░█░█▀█░█░█░█▀▀░█▀▄  
   ░▀░▀░▀▀▀░▀▀░░▀▀▀░▀▀▀░▀░▀░░░▀░▀░▀░▀░▀░▀░▀░▀░▀▀▀░▀▀▀░▀░▀  
-${BG_ORANGE}  ${BOLD}${BLACK}By Jordan Hillis [jordan@hillis.email] + ulno   ${WHITE}v${MANAGER_VERSION:-${VERSION:-dev}}  ${RESET}"
+${BG_ORANGE}  ${BOLD}${BLACK}${credit}${WHITE}${pad}${version}  ${RESET}"
 }
 
 # Function for menu header menu
