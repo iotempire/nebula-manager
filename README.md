@@ -1066,27 +1066,29 @@ The menu first shows what it **detected on this host**, then offers the ways to
 get a config:
 
 ```text
-┌────────────────────┤ Main Menu > Manager Setup ├────────────────────┐
-│ Manager config: none yet (~/.config/nebula-manager/nebula-manager.conf) │
-│ Nebula: installed (v1.11.2) - nebula.service running               │
-│ Certificates: /home/you/keys/nebula (7 .crt)                        │
-│                                                                     │
-│  1. Import / update from this host                                  │
-│  2. Import client bundle (.zip/.tar.gz)                             │
-│  3. Create config from template                                     │
-│  4. Browse for a config file                                        │
-│  5. Edit config                                                     │
-│  6. Delete config                                                   │
-│  7. Manage instances                                                │
-│  8. Certificate workspace                                           │
-│  9. Reload & continue                                               │
-│ 10. Exit                                                            │
-└─────────────────────────────────────────────────────────────────────┘
+=~=~=~=~=~=~=~=~=~=~=~[ Main Menu > Manager Setup ]~=~=~=~=~=~=~=~=~=~=~=
+First run: import this host, import a client bundle, or create/browse a manager config.
+Manager config: none yet (/home/you/.config/nebula-manager/nebula-manager.conf)
+Nebula: installed (v1.11.2) - nebula.service running
+Certificates: /home/you/keys/nebula (7 .crt)
+ 1. 📦 Import / update from this host
+ 2. 📤 Import client bundle (.zip/.tar.gz)
+ 3. 🆕 Create config from template
+ 4. 🔍 Browse for a config file
+ 5. 📝 Edit config
+ 6. 🗑️ Delete config
+ 7. 📄 Manage instances
+ 8. 🗝️ Certificate workspace
+ 9. 🔄 Reload & continue
+ 10. 🚪 Exit
+ [?] Choose an option [1-10, Enter=Exit, /=search, ?=help]:
 ```
 
-The status lines are recomputed on every redraw, so after an action (e.g.
-import) you immediately see the new state. Reached from the main menu, the
-Manager Setup menu is the same but without *Exit* (it has a *Back* instead).
+This is the default **plain** menu; `NEBULA_UI=whiptail` shows the same entries
+in a curses box (still used automatically for file browsing). The status lines
+are recomputed on every redraw, so after an action (e.g. import) you immediately
+see the new state. Reached from the main menu, the Manager Setup menu is the same
+but without *Exit* (it has a *Back* instead).
 
 - **Import / update** runs the read-only detector (`lib/import.sh`): it finds the
   systemd unit, its `ExecStart … -config`, `tun.dev`, `listen.port`, the
