@@ -18,7 +18,7 @@
 
 ---
 
-## ⚙️ Features
+## ✨ Features
 
 - 🔓 **Least-privilege by default** – runs as your user; granular `sudo` on demand.
 - 🚀 **Install & Update Nebula** from official releases (arch/OS aware).
@@ -1374,11 +1374,11 @@ mainly useful for testing.
 
 ## 📖 User stories
 
-Two guiding examples drive the workflow and act as the acceptance criteria for
-planned features — see **[docs/user-stories.md](docs/user-stories.md)**:
+Two guiding examples drive the workflow and act as acceptance criteria for the
+current tool — see **[docs/user-stories.md](docs/user-stories.md)**:
 
 1. **Theprof, the networking teacher** — import an existing hand-rolled Nebula mesh,
-   add two more home machines, and hand out per-student profile collections.
+   add two more home machines, and hand out per-student bundles with croc.
 2. **The students** — join Theprof's mesh from Windows, Linux and macOS.
 
 The first story makes the case for the **`import`** wizard — on a host where Nebula
@@ -1403,8 +1403,17 @@ is *already running*, discover the installation and offer to generate
       `nebula-manager.conf`; never silently elevate (show reason + command).
 - [x] **`instance add/list/remove/enable/disable`** (`server` alias) – manage
       `[server.*]` entries (idempotent add, informational `role`/`host`).
-- [ ] **`client-setup <bundle>`** – install a bundle + service on a new host.
-- [ ] **`profile create`** – group collections (N bundles + CA + README/install).
+- [x] **`import --bundle` client setup** – install a bundle + service on a new host
+      (the former `client-setup` idea).
+- [ ] **`profile create`** – group collections for a class: issue certs with
+      `--groups <group>` and a `--subnets`/`local_cidr` scope, render one config
+      per member (lighthouse + group isolation), and emit per-member
+      self-contained bundles, the shared `ca.crt`, install scripts and a **per-OS
+      README** (Linux/macOS + a Windows PowerShell snippet). Target output is a
+      ready-to-hand-out `dist/<group>/` directory; `fleet croc` can then serve it.
+- [ ] **`verify`** – re-check reachability to the lighthouse (and the certificate
+      chain) from a client, so a student can confirm their install without the
+      teacher's console.
 - [x] **Mobile certificates** – `sign --in-pub KEY.pub` signs a device-generated
       public key (no `.key` written) and `--qr OUT.png` emits the QR scanned by
       **Mobile Nebula** (Android/iOS); also available in the TUI with the

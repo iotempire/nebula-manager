@@ -1,9 +1,10 @@
 # User stories & guiding examples
 
 These two stories are the **guiding examples** for nebula-manager's workflow. They
-describe the intended end-to-end experience and double as a spec: steps marked
-**⚙️ planned** are not implemented yet and exist to steer development; steps
-marked **✅ today** work with the current tool.
+describe the intended end-to-end experience and double as acceptance criteria for
+the current tool. Open or not-yet-implemented work is tracked in
+[README ▸ Roadmap / TODO](../README.md#-roadmap--todo) rather than annotated
+inline here.
 
 > Motivation: on a host where Nebula is **already installed and running**, the
 > first thing the tool should do is **discover what is there** and offer to
@@ -87,12 +88,12 @@ graph TD
   L --- G2
 ```
 
-### Phase 0 — Import the existing setup (✅ available)
+### Phase 0 — Import the existing setup
 
 **TUI:** *Manager Setup ▸ Import / update from this host*.
 
 Today he would have to create a config by hand. The **intended** experience is a
-single discovery pass (✅ available):
+single discovery pass:
 
 ```bash
 $ nebula-manager import
@@ -141,7 +142,7 @@ nebula-manager config init          # write ~/.config/nebula-manager/nebula-mana
 nebula-manager config edit          # replace [server.nebula-example1] with your real server(s)
 ```
 
-### Phase 1 — Register the existing members (✅ available)
+### Phase 1 — Register the existing members
 
 **TUI:** *Instances ▸ Add Instance* (list/enable/disable/remove in the same menu).
 
@@ -159,7 +160,7 @@ Other subcommands: `server list` (table of `[server.*]` entries), `server remove
 `server enable|disable NAME`. `role`/`host` are stored as informational metadata;
 the functional keys are `dir`, `service`, `enabled`.
 
-### Phase 2 — Add home machines theprof3 and theprof4 (mostly ✅ today)
+### Phase 2 — Add home machines theprof3 and theprof4
 
 **TUI:** *Instances ▸ Add Instance*, *Certificates ▸ Generate Client Certificate*,
 *Certificates ▸ Bundle Client Zip*.
@@ -210,7 +211,7 @@ firewall:
       host: any
 ```
 
-On each new machine (✅ today): install Nebula first, then use the
+On each new machine: install Nebula first, then use the
 **self-contained installer** from the bundle (no clone needed):
 
 ```bash
@@ -270,7 +271,7 @@ sudo cp ~/nb/config.yml.template /etc/nebula/config.yml
 
 </details>
 
-### Phase 2b — Theprof's Android phone (✅ today, mobile app)
+### Phase 2b — Theprof's Android phone (mobile app)
 
 Theprof wants the mesh on his phone while travelling. Mobile clients don't run
 `nebula-manager`; the CA host prepares the certificate and the phone joins via
@@ -331,7 +332,7 @@ Notes:
 - `nebula-manager sign --in-pub … --qr …` (and the TUI mobile question) handles
    this step; it never writes a private key for a device-generated key.
 
-### Phase 2c — Tidy the accidental `laptops` group (✅ available)
+### Phase 2c — Tidy the accidental `laptops` group
 
 Because the early certificates were all signed with `--groups laptops`, every
 home machine (the framework, the ge75 and the new boxes) shares the same group,
@@ -430,7 +431,7 @@ before the change: a datestamped `backups/<timestamp>-<seq>-<reason>/` folder
 (private keys are never committed). *Certificates ▸ Store Backup / Git* or
 `nebula-manager cert store status|log|backup|git-init` shows and manages this.
 
-### Phase 2d — One firewall policy for all home machines (✅ available)
+### Phase 2d — One firewall policy for all home machines
 
 theprof has tuned the framework's firewall and now wants **the same rules on
 every `home` machine**, including the ones already installed. He saves that
@@ -485,7 +486,7 @@ $ nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 Student groups later reuse the same mechanism: a `students` pack with
 `groups: [students]` and per-group rules, embedded into every student bundle.
 
-### Phase 2e — Hand out the class bundles, one code per student (✅ today)
+### Phase 2e — Hand out the class bundles, one code per student
 
 **TUI:** *Fleet ▸ Share student bundles via croc* (or headless):
 
@@ -525,47 +526,6 @@ Root logins need no sudo; other users need passwordless sudo. `--dry-run` shows
 the exact remote commands, and `--config FILE` pushes a complete config instead of
 a policy merge.
 
-### Phase 3 — Two student groups of three machines (⚙️ planned "profiles")
-
-**TUI:** ⚙️ planned *Profiles ▸ Create group*.
-
-Theprof wants two isolated class networks and a ready-to-hand-out collection per
-group. ⚙️ Proposed:
-
-```bash
-$ nebula-manager profile create student-group-1 \
-      --ca ~/keys/nebula \
-      --lighthouse 10.100.0.1 \
-      --subnet 10.101.0.0/24 \
-      --members alice,bob,carol \
-      --groups students,g1
-
-$ nebula-manager profile create student-group-2 \
-      --subnet 10.102.0.0/24 \
-      --members dave,erin,frank \
-      --groups students,g2
-
-$ ls dist/
-student-group-1/  student-group-2/
-student-group-1/
-  alice-nebula-bundle.zip
-  bob-nebula-bundle.zip
-  carol-nebula-bundle.zip
-  ca.crt
-  README.txt
-  install.sh              # self-contained Linux/macOS installer
-  install.ps1             # Windows installer
-```
-
-A **profile** bundles: per-member cert/key + `config.yml` template (lighthouse
-pointed at `vps.theprof.demo:4545`), the shared `ca.crt`, and a `README` + install
-script. Firewall rules restrict each group to its own `subnet`, so groups can't
-see each other.
-
-What a profile must produce (spec): certs with `--groups <group>` and a
-`--subnets`/`local_cidr` scope, a `config.yml` per member, the CA, and a
-portable install/README. This is essentially `cert bundle` × N + shared assets.
-
 ---
 
 ## Story 2 — The students join
@@ -578,7 +538,7 @@ like `croc alice-theprof-mesh-3f9a1c2b`. Each archive is self-contained —
 students do **not** need to clone nebula-manager. Dana receives her signed cert +
 `ca.crt` (and an optional QR) for the mobile app instead.
 
-### Bianca — Ubuntu ✅ (Debian and Mint work the same)
+### Bianca — Ubuntu (Debian and Mint work the same)
 
 Per-distribution details (Fedora/RHEL, Arch/CachyOS, SELinux, firewalls) are in
 **[docs/linux-distros.md](linux-distros.md)**.
@@ -628,7 +588,7 @@ cd nebula-manager
 > **Arch/CachyOS:** `sudo pacman -S nebula go-yq libnewt ...`.
 > The bundle-installer path needs only `nebula` + `curl`/`unzip` (or `croc`).
 
-### Chen — macOS ✅ (bundle installer; brew/launchd)
+### Chen — macOS (bundle installer; brew/launchd)
 
 `nebula-manager`'s own service layer is systemd-oriented, but the **bundle
 installer** handles macOS: it restarts Nebula via `brew services` when present,
@@ -650,7 +610,7 @@ address.
 You can still clone nebula-manager for diagnostics (`./nebula-manager diag`),
 but it is not required for the install.
 
-### Dana — iPhone ✅ (App Store mobile app)
+### Dana — iPhone (App Store mobile app)
 
 Dana joins from iOS. There is no bash/`nebula-manager` on the phone (and no
 sideloading), so Theprof prepares her credentials and she imports them into
@@ -685,7 +645,7 @@ Notes:
 - Android works the same way (see Story 1, Phase 2b); the mobile app is **not**
    on F-Droid.
 
-### Alex — Windows ✅ (native PowerShell installer)
+### Alex — Windows (native PowerShell installer)
 
 Install Nebula for Windows first (release zip/MSI; `nebula.exe` must be in
 `PATH` or `C:\Program Files\Nebula\`), then run the bundle's PowerShell installer
@@ -722,33 +682,30 @@ The installer:
 - Cloning nebula-manager is **not** required for a client install; the classic
   route still works if you want the TUI/diagnostics.
 
-⚙️ Planned: `nebula-manager profile` also emits a **per-OS README** and a
-PowerShell snippet so Windows students have copy/paste steps; and a
-`nebula-manager verify` mode that re-checks reachability to the lighthouse from
-the student's machine.
-
 ---
 
-## Capability map (today vs planned)
+## Capability map
 
-| Capability | Status |
-|---|---|
-| Create CA, sign certs, list/inspect/expiry, remove | ✅ today |
-| **Batch group editing** (add/remove/move/set/rename/prune with a selector) | ✅ today |
-| **Firewall group picker + rule templates + `firewall explain`** (this host) | ✅ today |
-| **Policy packs** (create, embed in bundles, apply here, export per host) | ✅ today |
-| **Store history** (action log, datestamped backups, optional git snapshots) | ✅ today |
-| Unprivileged cert workspace (`--cert-dir` / `NEBULA_KEYS_DIR` / auto-detect) | ✅ today |
-| Client bundle (cert, key, `ca.crt`, config template) | ✅ today |
-| Tool config resolution + `config init/refresh/edit` (offline template) | ✅ today |
-| Diagnostics (TUN ip, UDP socket auto-detect, cert expiry) | ✅ today |
-| iperf3 bench (server/client) | ✅ today |
-| **`import`**: discover a running Nebula and generate `nebula-manager.conf` | ✅ today |
-| **`server add/list/remove/enable/disable`**: manage `[server.*]` entries | ✅ today |
-| **`client-setup <bundle>`**: install a bundle + service on a new host | ⚙️ planned |
-| **`profile create`**: group collections (N bundles + CA + README/install) | ⚙️ planned |
-| **Remote fleet push**: apply a rendered policy/config (and refreshed certs) over SSH | ⚙️ planned |
-| macOS `launchd` service management | ⚙️ planned |
-| Windows support (native) | ⚙️ planned (WSL documented) |
+| Capability |
+|---|
+| Create CA, sign certs, list/inspect/expiry, remove |
+| Mobile certs (`--in-pub`, `--qr`) |
+| **Batch group editing** (add/remove/move/set/rename/prune with a selector) |
+| **Firewall group picker + rule templates + `firewall explain`** (this host) |
+| **Policy packs** (create, embed in bundles, apply here, export per host) |
+| **Store history** (action log, datestamped backups, optional git snapshots) |
+| Unprivileged cert workspace (`--cert-dir` / `NEBULA_KEYS_DIR` / auto-detect) |
+| Self-contained client bundles (cert/key/CA, config, `install.sh`, `install.ps1`, README) |
+| Tool config resolution + `config init/refresh/edit` (offline template) |
+| Diagnostics (TUN ip, UDP socket auto-detect, cert expiry) and iperf3 |
+| **`import`** (discover a running Nebula) and **`import --bundle --start`** (install + service) |
+| **`instance add/list/remove/enable/disable`** (`server` alias) |
+| **Fleet croc** mass deployment (one code per node) |
+| **Fleet SSH** probe, config/firewall push, validation and restart |
+| Windows-native bundle installer (`install.ps1`) |
+| Update checks and auto-update |
 
-These stories are the acceptance criteria for the planned commands above.
+These stories double as acceptance criteria for the workflows above. Open items
+(profiles, macOS launchd in the TUI, pod/container support, and real
+Windows/Android/iOS confirmation) are tracked in
+[README ▸ Roadmap / TODO](../README.md#-roadmap--todo).
