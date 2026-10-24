@@ -1138,6 +1138,10 @@ BATS tests run when `bats` is installed. `test_realstore_readonly.sh` uses a rea
 store from `$NEBULA_TEST_STORE` (unset by default, so it skips) and only ever
 reads from it — no paths or names are hardcoded.
 
+The PowerShell installer is exercised under `pwsh` (including a simulated-Windows
+ACL/service run with mocks). **Real** Windows, Android and iPhone confirmation is
+tracked in [Roadmap ▸ Manual platform confirmation](#-roadmap--todo).
+
 `make lint` syntax-checks the entrypoint and all modules (and runs `shellcheck`
 when available).
 
@@ -1346,11 +1350,12 @@ after a first-hand run.
       `nebula.exe -test`, and `nebula.exe -service install` followed by
       start/restart of the `Nebula` service. Also confirm `-CertsOnly` updates a
       certificate without touching `config.yml`.
-- [ ] **Android — real device**: install **Mobile Nebula** (Google Play), sign a
-      device key on the CA host with `sign --in-pub KEY.pub --qr OUT.png`, scan
-      the QR, paste `ca.crt`, add the lighthouse (`10.100.0.1` /
-      `vps.theprof.demo:4545`), enable the site, and confirm `ping` and
-      `*.theprof.mesh` name resolution from another node.
+- [ ] **Android — real device**: install **Mobile Nebula** from Google Play
+      (and confirm whether an F-Droid build is available), sign a device key on
+      the CA host with `sign --in-pub KEY.pub --qr OUT.png`, scan the QR, paste
+      `ca.crt`, add the lighthouse (`10.100.0.1` / `vps.theprof.demo:4545`),
+      enable the site, and confirm `ping` and `*.theprof.mesh` name resolution
+      from another node.
 - [ ] **iPhone/iOS — real device**: same flow through the App Store version:
       QR/certificate import, `ca.crt`, lighthouse, VPN permission, and a `ping`
       from a desktop node. Confirm the app version and iOS minimum in the notes.
