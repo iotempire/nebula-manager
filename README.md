@@ -189,6 +189,24 @@ silently.
 [?] Enter the IP address [10.100.0.4/24]:
 ```
 
+#### Choosing the firewall for a new node
+
+After a node certificate is signed, the TUI asks which firewall its generated
+client config should carry:
+
+- suggested **policy packs** whose `groups` intersect the node's groups (shown
+  with their target groups) — the meaningful set derived from your existing
+  rules and certificates;
+- **copy this host's firewall** (the detected rules);
+- **permissive** (allow all inbound/outbound);
+- **Nebula defaults** (outbound allow, inbound drop);
+- **decide later** (at bundle time).
+
+The choice is remembered **per certificate**, and the last choice is offered as
+the default for the next node. Enter accepts the first entry. State lives in
+`${XDG_CONFIG_HOME:-~/.config}/nebula-manager/node-firewall.tsv` — a plain
+user-owned file, no `sudo` and no daemon.
+
 #### Mobile devices (Android / iOS)
 
 The same TUI entry asks **“Is this certificate for a phone/tablet (Mobile Nebula)?”**.
@@ -316,6 +334,8 @@ exact name, and lists candidates when the name is omitted or ambiguous:
 ./nebula-manager cert bundle host1              # exact or unique substring
 ./nebula-manager cert bundle host1 --out ~/Downloads
 ./nebula-manager cert bundle host1 ./bundles    # positional dir still works
+./nebula-manager cert bundle host1 --firewall permissive
+./nebula-manager cert bundle host1 --firewall pack:home  # same as --policy home
 export NEBULA_BUNDLE_DIR=~/exports              # default destination
 ```
 
@@ -331,6 +351,12 @@ lighthouses from the `[server.*]` entries plus the certificate workspace. Any
 value it still cannot determine is left commented out, listed at the top of the
 file, and reported as a warning — so a bundle never silently ships a config with
 missing lighthouses.
+
+Before writing, the bundle flow shows the **firewall menu** preselected with the
+node's saved choice (from certificate creation, or the last choice). Accept it
+with Enter, or override it for this bundle: a policy pack is embedded, while
+*permissive* / *Nebula defaults* / *copy this host's firewall* render the
+corresponding `firewall:` block.
 
 ### Importing a bundle on the client
 

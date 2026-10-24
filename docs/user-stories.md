@@ -173,6 +173,12 @@ free address `10.100.0.4/24`) — just press Enter to accept:
 [?] Enter the IP address [10.100.0.5/24]:    # next cert, after .4 is used
 ```
 
+After signing, the tool asks which **firewall the new node's client template**
+should carry (a suggested policy pack, this host's firewall, permissive, Nebula
+defaults, or decide later). That choice is remembered per certificate and is
+pre-selected when the bundle is exported, so theprof3/theprof4 get the home
+rules without re-selecting them.
+
 ```bash
 $ nebula-manager sign --cert-dir ~/keys/nebula \
       --name theprof3.theprof.mesh --ip 10.100.0.4/24 --groups laptops

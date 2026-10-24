@@ -340,10 +340,13 @@ Commands:
   cert store status|log|backup|git-init
                                   Certificate-store history: action log,
                                   datestamped backups or git snapshots
-  cert bundle|export [NAME] [--out DIR]
+  cert bundle|export [NAME] [--out DIR] [--policy PACK|none]
+                          [--firewall host|permissive|default|skip|pack:PACK]
                                   Export a client zip (NAME may be a unique
                                   substring; omit it to list candidates).
-                                  Default output: current dir, else ~/Downloads
+                                  Default output: current dir, else ~/Downloads.
+                                  The firewall defaults to the node's saved
+                                  choice from certificate creation.
   rename-group <old> <new>        Replace a group in every certificate that
                                   carries it (re-signs; keeps *.crt.bak).
                                   Options: --cert-dir DIR --yes

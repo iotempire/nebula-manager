@@ -202,6 +202,146 @@ policy_suggest_for_cert() {
     done | sort
 }
 
+# --- per-node firewall preference -------------------------------------------
+# When a node is created we ask which firewall its client config should use.
+# The choice is remembered per certificate (and as "last") so `cert bundle` can
+# preselect it. Everything lives under the user config dir; no root needed.
+node_fw_state_file() { printf '%s/node-firewall.tsv' "$(dirname "$(policy_dir)")"; }
+
+# node_fw_get <cert|last> ; prints "mode<TAB>pack" for the saved preference.
+node_fw_get() {
+    local key="${1:-}" f k mode pack
+    [[ -n "$key" ]] || return 1
+    f="$(node_fw_state_file)"
+    [[ -f "$f" ]] || return 1
+    while IFS=$'\t' read -r k mode pack; do
+        [[ -z "$k" || "$k" == \#* ]] && continue
+        [[ "$k" == "$key" ]] || continue
+        printf '%s\t%s' "$mode" "${pack:-}"
+        return 0
+    done < "$f"
+    return 1
+}
+
+# node_fw_set <cert|last> <mode> [pack] ; mode=skip removes the preference.
+node_fw_set() {
+    local key="$1" mode="$2" pack="${3:-}" f tmp
+    [[ -n "$key" && -n "$mode" ]] || return 2
+    f="$(node_fw_state_file)"
+    mkdir -p "$(dirname "$f")" || return 1
+    tmp="$(mktemp)" || return 1
+    if [[ -f "$f" ]]; then
+        awk -v k="$key" 'BEGIN { FS=OFS="\t" } $1 != k { print }' "$f" > "$tmp"
+    fi
+    [[ "$mode" == "skip" ]] || printf '%s\t%s\t%s\n' "$key" "$mode" "$pack" >> "$tmp"
+    mv "$tmp" "$f"
+}
+
+node_fw_describe() {
+    case "${1:-}" in
+        pack)       printf 'policy pack %s' "${2:-?}" ;;
+        host)       printf "copy this host's firewall (detected)" ;;
+        permissive) printf 'permissive (allow all in/out)' ;;
+        default)    printf 'Nebula defaults (outbound allow, inbound drop)' ;;
+        *)          printf 'decide later' ;;
+    esac
+}
+
+# node_fw_render_policy <permissive|default> ; prints a temp policy file path.
+node_fw_render_policy() {
+    local mode="$1" f
+    f="$(mktemp)" || return 1
+    case "$mode" in
+        permissive)
+            cat > "$f" <<'EOF'
+firewall:
+  inbound_action: accept
+  outbound_action: accept
+  inbound:
+    - port: any
+      proto: any
+      host: any
+  outbound:
+    - port: any
+      proto: any
+      host: any
+EOF
+            ;;
+        default)
+            printf 'firewall: {}\n' > "$f"
+            ;;
+        *) rm -f "$f"; return 1 ;;
+    esac
+    printf '%s' "$f"
+}
+
+# node_fw_choose_tui <cert> [cert_dir] [node|bundle]
+# Menu of meaningful firewall choices for one node. The saved per-node choice
+# (or the last used one) is offered first, so pressing Enter reuses it.
+# Suggested policy packs are derived from the certificate's groups. Prints
+# "mode<TAB>pack" and remembers the choice.
+node_fw_choose_tui() {
+    local cert="${1:?certificate name required}"
+    local cert_dir="${2:-$(resolve_cert_dir)}" context="${3:-node}"
+    local saved="" last="" mode="" pack="" p pg
+    saved="$(node_fw_get "$cert" 2>/dev/null || true)"
+    last="$(node_fw_get last 2>/dev/null || true)"
+
+    local -a pairs=()
+    if [[ -n "$saved" ]]; then
+        IFS=$'\t' read -r mode pack <<< "$saved"
+        pairs+=( "__saved__" "Keep saved choice: $(node_fw_describe "$mode" "$pack")" )
+    elif [[ -n "$last" ]]; then
+        IFS=$'\t' read -r mode pack <<< "$last"
+        pairs+=( "__saved__" "Use last choice: $(node_fw_describe "$mode" "$pack")" )
+    fi
+    if declare -F policy_suggest_for_cert >/dev/null; then
+        while IFS= read -r p; do
+            [[ -n "$p" ]] || continue
+            pg="$(yq -r '.groups // [] | join(":")' "$(policy_dir)/$p.yml" 2>/dev/null)"
+            pairs+=( "pack:$p" "Policy pack: $p${pg:+ (groups $pg)}" )
+        done < <(policy_suggest_for_cert "$cert" "$cert_dir" 2>/dev/null || true)
+    fi
+    pairs+=( "host" "Copy this host's firewall (detected)"
+             "permissive" "Permissive: allow all inbound/outbound"
+             "default" "Nebula defaults: outbound allow, inbound drop" )
+    # At bundle time there is nothing to defer; the host profile is the fallback.
+    [[ "$context" != bundle ]] && pairs+=( "skip" "Decide later (at bundle time)" )
+
+    local title prompt
+    if [[ "$context" == bundle ]]; then
+        title="Bundle firewall"
+        prompt="Which firewall should config.yml.template carry for $cert?"
+    else
+        title="Node firewall"
+        prompt="Which firewall should the client config for $cert use?"
+    fi
+
+    local choice
+    choice="$(ui_menu "$title" "$prompt" "${pairs[@]}")" || {
+        # Plain mode: Enter/Ctrl-D accepts the first (saved/last) choice.
+        if [[ "$(ui_backend)" == plain ]]; then choice="__first__"; else return 1; fi
+    }
+    [[ "$choice" == "__first__" ]] && choice="${pairs[0]}"
+
+    if [[ "$choice" == "__saved__" ]]; then
+        if [[ -n "$saved" ]]; then IFS=$'\t' read -r mode pack <<< "$saved"
+        else IFS=$'\t' read -r mode pack <<< "$last"; fi
+    else
+        case "$choice" in
+            pack:*) mode="pack"; pack="${choice#pack:}" ;;
+            host|permissive|default|skip) mode="$choice"; pack="" ;;
+            *) return 1 ;;
+        esac
+    fi
+
+    if [[ "$mode" != "skip" ]]; then
+        node_fw_set "$cert" "$mode" "$pack" || true
+        node_fw_set last "$mode" "$pack" || true
+    fi
+    printf '%s\t%s' "$mode" "${pack:-}"
+}
+
 # policy_export <pack> <out_dir> <cert_dir> [--select SPEC]... [--exclude SPEC]...
 # Write <out>/<cert-name>/firewall.yml (+ README.txt) for the selected certs.
 policy_export() {

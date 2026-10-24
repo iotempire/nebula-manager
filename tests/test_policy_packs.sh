@@ -135,8 +135,8 @@ fi
 
 # --- TUI bundle asks about the suggested pack ------------------------------
 mkdir -p "$SANDBOX/tuiout"
-# 1 = first exportable cert (home1), 2 = pack 'home' (none is 1), then out dir
-printf '1\n2\n%s\n' "$SANDBOX/tuiout" | pki_bundle_client_menu >/dev/null 2>&1
+# 1 = first exportable cert (home1), 1 = suggested pack 'home', then out dir
+printf '1\n1\n%s\n' "$SANDBOX/tuiout" | pki_bundle_client_menu >/dev/null 2>&1
 assert_file "TUI bundle exists" "$SANDBOX/tuiout/home1.mesh-nebula-bundle.zip"
 if command -v unzip >/dev/null 2>&1; then
     unzip -p "$SANDBOX/tuiout/home1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/tuipolicy.yml"

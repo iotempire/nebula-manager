@@ -671,10 +671,19 @@ generate_nebula_cert() {
         read -p "$(show_status 'question') QR code output path [${qr_default}]: " cert_gen_qr
         [[ -z "$cert_gen_qr" ]] && cert_gen_qr="$qr_default"
     fi
-    CERT_DIR="$cert_dir" SIGN_NAME="$cert_gen_name" SIGN_IP="$cert_gen_ip" \
+    if CERT_DIR="$cert_dir" SIGN_NAME="$cert_gen_name" SIGN_IP="$cert_gen_ip" \
         SIGN_GROUPS="$cert_gen_groups" SIGN_SUBNETS="$cert_gen_subnets" SIGN_DURATION_H="$cert_gen_duration" \
         SIGN_IN_PUB="$cert_gen_pub" SIGN_QR="$cert_gen_qr" \
-        pki_sign
+        pki_sign; then
+        # Ask which firewall the generated client config should carry. Mobile
+        # certificates have no local client config, so skip them. The choice is
+        # remembered per node and preselects the bundle flow later.
+        if (( ! cert_is_mobile )) && declare -F node_fw_choose_tui >/dev/null; then
+            node_fw_choose_tui "$cert_gen_name" "$cert_dir" node >/dev/null || true
+        fi
+        return 0
+    fi
+    return 1
 }
 
 ###################################################################
@@ -2331,20 +2340,22 @@ pki_bundle_client_menu() {
     esac
     [[ "$name" != "$choice" ]] && log_info "Matched '$choice' -> '$name'"
 
-    # Suggest a policy pack whose target groups intersect this cert's groups.
-    # Never applied silently: it is a menu with an explicit "none" entry.
-    local policy_path="" pchoice s
-    local -a sugg=() ppairs=( none "No policy pack (use the detected firewall)" )
-    if declare -F policy_suggest_for_cert >/dev/null; then
-        mapfile -t sugg < <(policy_suggest_for_cert "$name" "$cert_dir")
+    # Firewall for the generated client template. The preference saved when the
+    # node was created (or the last choice) is offered first; packs are suggested
+    # from this certificate's groups. Nothing is applied silently.
+    local policy_path="" fw_mode="host" fw_pack="" fw_tmp="" fwsel=""
+    if declare -F node_fw_choose_tui >/dev/null; then
+        fwsel="$(node_fw_choose_tui "$name" "$cert_dir" bundle)" || fwsel=$'host\t'
+        IFS=$'\t' read -r fw_mode fw_pack <<< "$fwsel"
     fi
-    if (( ${#sugg[@]} > 0 )); then
-        for s in "${sugg[@]}"; do ppairs+=( "$s" "Use policy pack '$s'" ); done
-        pchoice="$(ui_menu "Policy pack" "Suggested for $name (matches its groups):" "${ppairs[@]}")" || pchoice=none
-        if [[ -n "$pchoice" && "$pchoice" != none ]]; then
-            policy_path="$(policy_resolve "$pchoice")" || policy_path=""
-        fi
-    fi
+    case "$fw_mode" in
+        pack)
+            policy_path="$(policy_resolve "$fw_pack")" || policy_path="" ;;
+        permissive|default)
+            policy_path="$(node_fw_render_policy "$fw_mode")" || policy_path=""
+            fw_tmp="$policy_path" ;;
+        *)  policy_path="" ;;
+    esac
 
     local default_out out
     default_out="$(pki_default_bundle_dir)"
@@ -2352,6 +2363,9 @@ pki_bundle_client_menu() {
     out="${out/#\~/$HOME}"
     [[ -z "$out" ]] && out="$default_out"
     pki_bundle_client_zip "$name" "$out" "$cert_dir" "$policy_path"
+    local rc=$?
+    [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
+    return $rc
 }
 
 # --- Headless CLI --------------------------------------------------
@@ -2363,7 +2377,7 @@ pki_cli() {
         expiry) list_certs_expiry "${1:-}" ;;
         remove|rm) pki_remove "${1:?certificate name required}" ;;
         bundle|export|zip)
-            local name="" out="" policy=""
+            local name="" out="" policy="" fw_override=""
             while (($#)); do
                 case "$1" in
                     --out=*) out="${1#*=}" ;;
@@ -2378,8 +2392,16 @@ pki_cli() {
                         [[ $# -gt 0 && -n "$1" ]] || { log_error "'cert bundle --policy' requires a pack name (or 'none')"; return 2; }
                         policy="$1"
                         ;;
+                    --firewall=*) fw_override="${1#*=}" ;;
+                    --firewall)
+                        shift
+                        [[ $# -gt 0 && -n "$1" ]] || { log_error "'cert bundle --firewall' requires a mode (host|permissive|default|skip|pack:NAME)"; return 2; }
+                        fw_override="$1"
+                        ;;
                     -h|--help)
-                        echo "Usage: nebula-manager cert bundle <name|match> [--out DIR] [--policy NAME|none] [--cert-dir DIR]" >&2
+                        echo "Usage: nebula-manager cert bundle <name|match> [--out DIR] [--policy NAME|none] [--firewall MODE] [--cert-dir DIR]" >&2
+                        echo "       --firewall: host | permissive | default | skip | pack:NAME" >&2
+                        echo "       (default: the choice saved when the node was created)" >&2
                         echo "       omitting <name> lists the certificates that can be exported" >&2
                         return 0 ;;
                     -*) log_error "Unknown option for 'cert bundle': $1"; return 2 ;;
@@ -2415,19 +2437,49 @@ pki_cli() {
                     ;;
             esac
             out="${out/#\~/$HOME}"
-            local policy_path="" sugg
-            if [[ "$policy" == "none" ]]; then
-                :   # explicit opt-out
-            elif [[ -n "$policy" ]]; then
-                policy_path="$(policy_resolve "$policy")" || return 1
-            elif declare -F policy_suggest_for_cert >/dev/null; then
-                sugg="$(policy_suggest_for_cert "$name" "$cert_dir" | paste -sd, -)"
-                if [[ -n "$sugg" ]]; then
-                    log_info "Suggested policy pack(s) for $name: ${CYAN}$sugg${RESET}"
-                    log_info "Embed one with --policy <name> (nothing is applied automatically)."
+            local policy_path="" sugg fw_tmp="" fwsel=""
+            if [[ -n "$policy" ]]; then
+                if [[ "$policy" != "none" ]]; then
+                    policy_path="$(policy_resolve "$policy")" || return 1
+                fi
+            else
+                # Use the per-node choice saved at creation time unless overridden.
+                if [[ -z "$fw_override" ]] && declare -F node_fw_get >/dev/null; then
+                    fwsel="$(node_fw_get "$name" 2>/dev/null || true)"
+                    case "$fwsel" in
+                        pack$'\t'*)  fw_override="pack:${fwsel#*$'\t'}" ;;
+                        host*)       fw_override="host" ;;
+                        permissive*) fw_override="permissive" ;;
+                        default*)    fw_override="default" ;;
+                    esac
+                fi
+                case "$fw_override" in
+                    pack:*)
+                        policy_path="$(policy_resolve "${fw_override#pack:}")" || return 1 ;;
+                    permissive|default)
+                        policy_path="$(node_fw_render_policy "$fw_override")" || return 1
+                        fw_tmp="$policy_path" ;;
+                    host|skip|"")
+                        : ;;   # detected host firewall / no saved choice
+                    *)
+                        log_error "Unknown --firewall mode: '$fw_override' (host|permissive|default|skip|pack:NAME)"
+                        return 2 ;;
+                esac
+                if [[ "$fw_override" == pack:* || "$fw_override" == permissive || "$fw_override" == default ]]; then
+                    log_info "Firewall for $name: $(node_fw_describe "${fw_override%%:*}" "${fw_override#pack:}")"
+                fi
+                if [[ -z "$policy_path" && -z "$fw_override" ]] && declare -F policy_suggest_for_cert >/dev/null; then
+                    sugg="$(policy_suggest_for_cert "$name" "$cert_dir" | paste -sd, -)"
+                    if [[ -n "$sugg" ]]; then
+                        log_info "Suggested policy pack(s) for $name: ${CYAN}$sugg${RESET}"
+                        log_info "Embed one with --policy <name> or --firewall pack:<name> (nothing is applied automatically)."
+                    fi
                 fi
             fi
             pki_bundle_client_zip "$name" "${out:-$(pki_default_bundle_dir)}" "$cert_dir" "$policy_path"
+            local bundle_rc=$?
+            [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
+            return $bundle_rc
             ;;
         workspace)
             select_cert_workspace ;;
