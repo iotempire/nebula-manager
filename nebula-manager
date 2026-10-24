@@ -342,11 +342,14 @@ Commands:
                                   datestamped backups or git snapshots
   cert bundle|export [NAME] [--out DIR] [--policy PACK|none]
                           [--firewall host|permissive|default|skip|pack:PACK]
-                                  Export a client zip (NAME may be a unique
-                                  substring; omit it to list candidates).
+                          [--share-url URL] [--croc-code CODE]
+                                  Export a self-contained client zip (NAME may be
+                                  a unique substring; omit it to list candidates).
                                   Default output: current dir, else ~/Downloads.
                                   The firewall defaults to the node's saved
                                   choice from certificate creation.
+                                  --share-url/--croc-code fill the one-liners in
+                                  the bundle's README.txt.
   rename-group <old> <new>        Replace a group in every certificate that
                                   carries it (re-signs; keeps *.crt.bak).
                                   Options: --cert-dir DIR --yes

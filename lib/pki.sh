@@ -1539,12 +1539,89 @@ pki_resolve_bundle_name() {
     return 1
 }
 
-# pki_bundle_client_zip <name> [out_dir] [cert_dir] [policy_path]
+# Directory holding the self-contained installer assets for client bundles.
+pki_bundle_asset_dir() {
+    local d=""
+    if [[ -n "${MANAGER_LIB_DIR:-}" && -d "$MANAGER_LIB_DIR/bundle" ]]; then
+        d="$MANAGER_LIB_DIR/bundle"
+    elif [[ -n "${MANAGER_ROOT:-}" && -d "$MANAGER_ROOT/lib/bundle" ]]; then
+        d="$MANAGER_ROOT/lib/bundle"
+    fi
+    printf '%s' "$d"
+}
+
+# pki_render_bundle_readme <template> <out> <name> <archive> <policy> <url> <croc>
+pki_render_bundle_readme() {
+    local tpl="$1" out="$2" name="$3" archive="$4" policy="$5" url="$6" croc="$7"
+    local line now ext extract_linux extract_croc extract_win
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+    if [[ "$archive" == *.zip ]]; then
+        ext="zip"
+        extract_linux='unzip -q "$tmp/b.zip" -d "$tmp"'
+        extract_croc="unzip -q '*.zip'"
+        extract_win='Expand-Archive $z $d -Force'
+    else
+        ext="tar.gz"
+        extract_linux='tar -xzf "$tmp/b.tar.gz" -C "$tmp"'
+        extract_croc="tar -xzf '*.tar.gz'"
+        extract_win='tar.exe -xzf $z -C $d'
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line//@NAME@/$name}"
+        line="${line//@ARCHIVE@/$archive}"
+        line="${line//@DATE@/$now}"
+        line="${line//@POLICY@/$policy}"
+        line="${line//@HTTP_URL@/$url}"
+        line="${line//@CROC_CODE@/$croc}"
+        line="${line//@EXT@/$ext}"
+        line="${line//@EXTRACT_LINUX@/$extract_linux}"
+        line="${line//@EXTRACT_CROC@/$extract_croc}"
+        line="${line//@EXTRACT_WIN@/$extract_win}"
+        printf '%s\n' "$line"
+    done < "$tpl" > "$out"
+}
+
+# pki_bundle_share_instructions <archive> [url] [croc-code]
+pki_bundle_share_instructions() {
+    local archive="$1" url="${2:-}" croc="${3:-}" file dir ext extract_linux extract_croc win_extract
+    file="$(basename "$archive")"
+    dir="$(cd "$(dirname "$archive")" 2>/dev/null && pwd)"
+    [[ -n "$url" ]] || url="http://<this-host>:8000/$file"
+    [[ -n "$croc" ]] || croc="<CROC-CODE>"
+    if [[ "$archive" == *.zip ]]; then
+        ext="zip"
+        extract_linux='unzip -q "$tmp/b.zip" -d "$tmp"'
+        extract_croc="unzip -q '*.zip'"
+        win_extract='Expand-Archive $z $d -Force'
+    else
+        ext="tar.gz"
+        extract_linux='tar -xzf "$tmp/b.tar.gz" -C "$tmp"'
+        extract_croc="tar -xzf '*.tar.gz'"
+        win_extract='tar.exe -xzf $z -C $d'
+    fi
+    cat <<EOF
+
+Share this bundle (it contains a private key - use a trusted channel):
+  folder:       $dir
+  HTTP server:  python3 -m http.server 8000 --directory "$dir"
+  URL:          $url
+  Linux/macOS:  tmp=\$(mktemp -d) && curl -fsSL "$url" -o "\$tmp/b.$ext" && $extract_linux && sudo bash "\$tmp/install.sh"
+  Windows:      \$d=Join-Path \$env:TEMP 'nebula-bundle'; \$z=Join-Path \$env:TEMP 'nb.$ext'; Invoke-WebRequest '$url' -OutFile \$z; $win_extract; powershell -ExecutionPolicy Bypass -File (Join-Path \$d 'install.ps1')
+  croc send:    croc send "$archive"    (share the code it prints)
+  croc client:  tmp=\$(mktemp -d) && cd "\$tmp" && croc --yes $croc && $extract_croc && sudo bash install.sh
+  croc Windows: cd \$env:TEMP; croc --yes $croc
+  Details:      README.txt inside the archive
+EOF
+}
+
+# pki_bundle_client_zip <name> [out_dir] [cert_dir] [policy_path] [share_url] [croc_code]
 pki_bundle_client_zip() {
     local name="${1:?client name required}"
     local out_dir="${2:-$(pki_default_bundle_dir)}"
     local cert_dir="${3:-$(resolve_cert_dir)}"
     local policy_path="${4:-}"
+    local share_url="${5:-${NEBULA_BUNDLE_SHARE_URL:-}}"
+    local croc_code="${6:-${NEBULA_BUNDLE_CROC_CODE:-}}"
     CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
     local crt="$cert_dir/$name.crt" key="$cert_dir/$name.key"
     local ca; ca="$(find_ca_crt "$cert_dir" || true)"
@@ -1567,37 +1644,61 @@ pki_bundle_client_zip() {
     if [[ "$out_dir" == "$cert_dir" ]]; then
         log_warn "Writing the bundle into the certificate store itself - consider another directory."
     fi
+
+    local have_zip=0; command -v zip >/dev/null 2>&1 && have_zip=1
+    local archive_name="${name}-nebula-bundle.zip"
+    (( have_zip )) || archive_name="${name}-nebula-bundle.tar.gz"
+    local http_url="" policy_desc="detected firewall (this host)"
+    if [[ -n "$share_url" ]]; then http_url="${share_url%/}/$archive_name"
+    else http_url="http://<this-host>:8000/$archive_name"; fi
+    [[ -n "$policy_path" ]] && policy_desc="policy pack '$(basename "$policy_path" .yml)'"
+
     local tmp; tmp="$(mktemp -d)"
     cp "$crt" "$tmp/$name.crt"
     cp "$key" "$tmp/$name.key"
     cp "$ca"  "$tmp/ca.crt"
     pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" "$policy_path"
 
-    local zipfile="$out_dir/${name}-nebula-bundle.zip"
+    # Self-contained installers (Linux/macOS + Windows) and a client README.
+    local -a files=( "$name.crt" "$name.key" "ca.crt" "config.yml.template" )
+    local asset_dir asset have_assets=1
+    asset_dir="$(pki_bundle_asset_dir)"
+    for asset in install.sh install.ps1 README.txt; do
+        if [[ -n "$asset_dir" && -f "$asset_dir/$asset" ]]; then
+            cp "$asset_dir/$asset" "$tmp/$asset" || { log_error "Could not copy $asset"; rm -rf "$tmp"; return 1; }
+        else
+            have_assets=0
+        fi
+    done
+    if (( have_assets )); then
+        chmod +x "$tmp/install.sh" 2>/dev/null || true
+        pki_render_bundle_readme "$asset_dir/README.txt" "$tmp/README.txt" \
+            "$name" "$archive_name" "$policy_desc" "$http_url" "${croc_code:-<CROC-CODE>}" \
+            || { log_error "Could not render the bundle README"; rm -rf "$tmp"; return 1; }
+        files+=( install.sh install.ps1 README.txt )
+    else
+        log_warn "Bundle installer assets missing ($asset_dir); the archive will not be self-contained."
+    fi
+
+    local zipfile="$out_dir/$archive_name"
     rm -f "$zipfile"
-    if command -v zip >/dev/null 2>&1; then
-        ( cd "$tmp" && zip -q "$zipfile" "$name.crt" "$name.key" ca.crt config.yml.template ) \
+    if (( have_zip )); then
+        ( cd "$tmp" && zip -q "$zipfile" "${files[@]}" ) \
             || { log_error "Failed to create zip bundle."; rm -rf "$tmp"; return 1; }
         chmod 600 "$zipfile" 2>/dev/null || true
     else
-        local tarball="$out_dir/${name}-nebula-bundle.tar.gz"
-        ( cd "$tmp" && tar -czf "$tarball" "$name.crt" "$name.key" ca.crt config.yml.template ) \
+        ( cd "$tmp" && tar -czf "$zipfile" "${files[@]}" ) \
             || { log_error "Failed to create tar bundle."; rm -rf "$tmp"; return 1; }
-        chmod 600 "$tarball" 2>/dev/null || true
-        rm -rf "$tmp"
-        if declare -F cert_store_log >/dev/null; then
-            cert_store_log "$cert_dir" "bundle name=\"$name\" out=\"$tarball\" policy=\"${policy_path:+$(basename "$policy_path" .yml)}\""
-        fi
-        log_warn "zip not found; wrote $tarball instead."
-        printf '%s\n' "$tarball"
-        return 0
+        chmod 600 "$zipfile" 2>/dev/null || true
     fi
     rm -rf "$tmp"
     if declare -F cert_store_log >/dev/null; then
         cert_store_log "$cert_dir" "bundle name=\"$name\" out=\"$zipfile\" policy=\"${policy_path:+$(basename "$policy_path" .yml)}\""
     fi
+    (( have_zip )) || log_warn "zip not found; wrote $zipfile instead."
     log_success "Client bundle created: $zipfile"
-    log_info "Contains: ${name}.crt, ${name}.key, ca.crt, config.yml.template (keep it safe - it holds the private key)."
+    log_info "Contains: ${name}.crt, ${name}.key, ca.crt, config.yml.template$([[ $have_assets == 1 ]] && echo ', install.sh, install.ps1, README.txt') (keep it safe - it holds the private key)."
+    pki_bundle_share_instructions "$zipfile" "$http_url" "$croc_code"
     printf '%s\n' "$zipfile"
 }
 
@@ -2362,7 +2463,7 @@ pki_bundle_client_menu() {
     out="$(ui_dselect "Bundle / Export Client" "Output directory [${default_out}]:" "$default_out")" || return 0
     out="${out/#\~/$HOME}"
     [[ -z "$out" ]] && out="$default_out"
-    pki_bundle_client_zip "$name" "$out" "$cert_dir" "$policy_path"
+    pki_bundle_client_zip "$name" "$out" "$cert_dir" "$policy_path" "" ""
     local rc=$?
     [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
     return $rc
@@ -2377,7 +2478,7 @@ pki_cli() {
         expiry) list_certs_expiry "${1:-}" ;;
         remove|rm) pki_remove "${1:?certificate name required}" ;;
         bundle|export|zip)
-            local name="" out="" policy="" fw_override=""
+            local name="" out="" policy="" fw_override="" share_url="" croc_code=""
             while (($#)); do
                 case "$1" in
                     --out=*) out="${1#*=}" ;;
@@ -2398,10 +2499,23 @@ pki_cli() {
                         [[ $# -gt 0 && -n "$1" ]] || { log_error "'cert bundle --firewall' requires a mode (host|permissive|default|skip|pack:NAME)"; return 2; }
                         fw_override="$1"
                         ;;
+                    --share-url=*) share_url="${1#*=}" ;;
+                    --share-url)
+                        shift
+                        [[ $# -gt 0 && -n "$1" ]] || { log_error "'cert bundle --share-url' requires a URL"; return 2; }
+                        share_url="$1"
+                        ;;
+                    --croc-code=*) croc_code="${1#*=}" ;;
+                    --croc-code)
+                        shift
+                        [[ $# -gt 0 && -n "$1" ]] || { log_error "'cert bundle --croc-code' requires a code"; return 2; }
+                        croc_code="$1"
+                        ;;
                     -h|--help)
-                        echo "Usage: nebula-manager cert bundle <name|match> [--out DIR] [--policy NAME|none] [--firewall MODE] [--cert-dir DIR]" >&2
+                        echo "Usage: nebula-manager cert bundle <name|match> [--out DIR] [--policy NAME|none] [--firewall MODE] [--share-url URL] [--croc-code CODE] [--cert-dir DIR]" >&2
                         echo "       --firewall: host | permissive | default | skip | pack:NAME" >&2
                         echo "       (default: the choice saved when the node was created)" >&2
+                        echo "       --share-url / --croc-code fill the one-liners in README.txt" >&2
                         echo "       omitting <name> lists the certificates that can be exported" >&2
                         return 0 ;;
                     -*) log_error "Unknown option for 'cert bundle': $1"; return 2 ;;
@@ -2476,7 +2590,7 @@ pki_cli() {
                     fi
                 fi
             fi
-            pki_bundle_client_zip "$name" "${out:-$(pki_default_bundle_dir)}" "$cert_dir" "$policy_path"
+            pki_bundle_client_zip "$name" "${out:-$(pki_default_bundle_dir)}" "$cert_dir" "$policy_path" "$share_url" "$croc_code"
             local bundle_rc=$?
             [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
             return $bundle_rc

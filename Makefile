@@ -11,10 +11,10 @@ test:
 
 lint:
 	@bash -n nebula-manager
-	@for f in lib/*.sh tests/*.sh run_tests.sh nebula-manager.sh; do bash -n "$$f" || exit 1; done
+	@for f in lib/*.sh lib/bundle/install.sh tests/*.sh run_tests.sh nebula-manager.sh; do bash -n "$$f" || exit 1; done
 	@if shellcheck --version >/dev/null 2>&1; then \
 		echo "running shellcheck (errors only)..."; \
-		shellcheck -x -S error nebula-manager lib/*.sh; \
+		shellcheck -x -S error nebula-manager lib/*.sh lib/bundle/install.sh; \
 	 else \
 		echo "shellcheck unavailable (skipping)"; \
 	 fi

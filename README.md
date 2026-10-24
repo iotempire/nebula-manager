@@ -88,11 +88,14 @@ cd nebula-manager
 ### 🔹 Option 2: Download the entrypoint and modules
 
 ```bash
-mkdir -p nebula-manager/lib && cd nebula-manager
+mkdir -p nebula-manager/lib/bundle && cd nebula-manager
 base=https://raw.githubusercontent.com/jordanhillis/nebula-manager/refs/heads/main
 curl -fsSL "$base/nebula-manager" -o nebula-manager
-for m in ui.sh pki.sh bench.sh system.sh nebula-manager.conf.template; do
+for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh nebula-manager.conf.template; do
   curl -fsSL "$base/lib/$m" -o "lib/$m"
+done
+for m in install.sh install.ps1 README.txt; do
+  curl -fsSL "$base/lib/bundle/$m" -o "lib/bundle/$m"
 done
 chmod +x nebula-manager
 ./nebula-manager
@@ -105,7 +108,7 @@ Use **Updates & Install ▸ Install Script to System** inside the TUI, or copy m
 ```bash
 sudo install -d /usr/local/bin /usr/local/lib/nebula-manager/lib
 sudo install -m755 nebula-manager /usr/local/bin/nebula-manager
-sudo cp lib/*.sh lib/*.template /usr/local/lib/nebula-manager/lib/
+sudo cp -a lib/. /usr/local/lib/nebula-manager/lib/
 ```
 
 The entrypoint auto-discovers `lib/` in the following order:
@@ -119,7 +122,7 @@ Nebula Manager checks for required tools on first run and prints an install
 command if any are missing (skippable via `ignore_dependency_check` in the conf).
 
 **Required:** `gawk` (`awk`), `curl`, `findutils` (`find`), `grep`, `jq`, `sed`, `sudo`, `systemd` (`systemctl`), `tar`, `wget`, `coreutils` (`sha256sum`), `iputils-ping`
-**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`)
+**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (peer-to-peer bundle transfer without opening ports)
 
 > 📖 Per-distribution manuals (Ubuntu/Debian/Mint, Fedora/RHEL, Arch/CachyOS,
 > including SELinux and firewall notes): **[docs/linux-distros.md](docs/linux-distros.md)**.
@@ -336,13 +339,83 @@ exact name, and lists candidates when the name is omitted or ambiguous:
 ./nebula-manager cert bundle host1 ./bundles    # positional dir still works
 ./nebula-manager cert bundle host1 --firewall permissive
 ./nebula-manager cert bundle host1 --firewall pack:home  # same as --policy home
+./nebula-manager cert bundle host1 --share-url https://class.example/bundles
+./nebula-manager cert bundle host1 --croc-code 1234-abcd  # fill the croc one-liner
 export NEBULA_BUNDLE_DIR=~/exports              # default destination
+export NEBULA_BUNDLE_SHARE_URL=https://class.example/bundles
+export NEBULA_BUNDLE_CROC_CODE=1234-abcd
 ```
 
 Destination precedence: `--out` → `NEBULA_BUNDLE_DIR` → the directory
-nebula-manager was started in → `~/Downloads` → `~/tmp` → `$TMPDIR`. The zip
-contains the cert, key, `ca.crt` and a `config.yml.template`, and is written
+nebula-manager was started in → `~/Downloads` → `~/tmp` → `$TMPDIR`. The archive
+contains the cert, key, `ca.crt`, `config.yml.template`, **`install.sh`**,
+**`install.ps1`** and a `README.txt` with client instructions, and is written
 mode **0600** because it holds the private key.
+
+#### Self-contained installers
+
+The bundle no longer needs nebula-manager on the client:
+
+```text
+install.sh    Linux/macOS: installs cert/key/CA + config, validates,
+              then enables/restarts systemd (or brew/launchd on macOS)
+install.ps1   Windows: same, using nebula.exe -service install/start
+README.txt    files, install commands, one-liners, security note
+```
+
+```bash
+# Linux / macOS (system install)
+sudo bash install.sh
+# refresh only the certificate/key/CA (keep config.yml):
+sudo bash install.sh --certs-only
+# user-owned directory, no sudo, no service:
+bash install.sh --dir ~/nebula --no-start
+
+# Windows (elevated PowerShell)
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -CertsOnly
+```
+
+Both installers:
+
+- are **portable where it matters**: the file/config/backup logic in
+  `install.ps1` runs under `pwsh` on Linux/macOS too (covered by the test suite),
+  with only elevation/ACLs/Windows-service handling guarded by OS detection;
+- back up existing files as `<file>.bak.YYYYmmdd-HHMMSS`;
+- **`--certs-only` / `-CertsOnly`** refreshes just cert/key/CA and leaves an
+  existing `config.yml` untouched (useful after a re-sign or group change);
+- **stop and show a diff if `config.yml` already exists**, asking before
+  overwriting (`--yes` / `-Yes` for automation; a non-interactive shell without
+  `--yes`/`-Yes` refuses to touch it);
+- rewrite `/etc/nebula` in the template when `--dir` / `-Dir` is used;
+- set the private key mode `600` (Linux/macOS) or restrict it to
+  `SYSTEM`+`Administrators` (Windows);
+- validate with `nebula -test` when the binary is available;
+- (re)start the service unless `--no-start` / `-NoStart` is given.
+
+#### Sharing one-liners
+
+Every bundle creation prints ready-to-share commands and embeds them in
+`README.txt`. Use `--share-url` (or `NEBULA_BUNDLE_SHARE_URL`) and
+`--croc-code` (or `NEBULA_BUNDLE_CROC_CODE`) to fill in real values:
+
+```bash
+# HTTP: serve the folder, then let clients run the one-liner
+python3 -m http.server 8000 --directory ~/exports
+# client:
+tmp=$(mktemp -d) && curl -fsSL https://class.example/bundles/host1-nebula-bundle.zip \
+  -o "$tmp/b.zip" && unzip -q "$tmp/b.zip" -d "$tmp" && sudo bash "$tmp/install.sh"
+
+# croc (no open ports, good behind NAT/eduroam)
+croc send ~/exports/host1-nebula-bundle.zip       # share the code it prints
+# client:
+tmp=$(mktemp -d) && cd "$tmp" && croc --yes CODE && unzip -q '*.zip' && sudo bash install.sh
+```
+
+Windows equivalents (PowerShell `Invoke-WebRequest`/`Expand-Archive` or
+`croc`) are in the bundle's `README.txt`. The classic route — clone the repo and
+use **Manager Setup ▸ Import client bundle** — still works; cloning is optional
+for a client install.
 
 The template is **populated from the running Nebula config** when one can be
 read (`static_host_map`, `lighthouse.hosts`/`interval`, `punchy`, `listen`,
@@ -360,10 +433,13 @@ corresponding `firewall:` block.
 
 ### Importing a bundle on the client
 
-**Manager Setup ▸ Import client bundle (.zip/.tar.gz)** opens a file browser, extracts
+On a machine that already has nebula-manager, **Manager Setup ▸ Import client
+bundle (.zip/.tar.gz)** opens a file browser, extracts
 the archive safely, validates `ca.crt` plus the matching `<name>.crt`/`<name>.key`,
 and installs them together with the bundled `config.yml.template` (renamed to
 `config.yml`, with `/etc/nebula` rewritten if you choose another target).
+On a bare client, use the self-contained `install.sh` / `install.ps1` from the
+archive instead (see above).
 
 The install-directory menu explains the trade-off and offers a default:
 
@@ -796,6 +872,8 @@ firewall diff/confirm still applies on the way out), shown, edited or deleted.
 |---|---|
 | `NEBULA_KEYS_DIR` | Certificate workspace (2nd precedence, after `--cert-dir`) |
 | `NEBULA_BUNDLE_DIR` | Default directory for exported client bundles (default: start dir, then `~/Downloads`, `~/tmp`) |
+| `NEBULA_BUNDLE_SHARE_URL` | Base URL used in the bundle's README/one-liners (same as `--share-url`) |
+| `NEBULA_BUNDLE_CROC_CODE` | croc code pre-filled in the bundle's README/one-liners (same as `--croc-code`) |
 | `NEBULA_LOCAL_CONFIG` | Explicit Nebula `config.yml` used to populate generated client templates (default: active server dir, then `/etc/nebula/config.yml`) |
 | `NEBULA_NO_LOCAL_CONFIG` | Set to `1` to skip auto-detecting the host's Nebula config for templates (an explicit `NEBULA_LOCAL_CONFIG` still applies) |
 | `NEBULA_MANAGER_LIB` | Override the `lib/` module directory |
@@ -1042,6 +1120,8 @@ What it covers:
 | `tests/test_cli.sh` | CLI parsing, flag precedence, usage/exit codes, end-to-end unprivileged PKI |
 | `tests/test_debug.sh` | `DEBUG` levels: `learn` prints notes + commands to stderr only, mirrors them into the store audit log, `warn` hides info, stdout stays clean |
 | `tests/test_bundle.sh` | client export: candidate listing, substring/ambiguous matching, default output dir, TUI picker, mode 0600 |
+| `tests/test_bundle_installer.sh` | self-contained bundles: install.sh/install.ps1/README shipped, user-owned install without sudo, config diff + refusal/`--yes`, backups, share one-liners |
+| `tests/test_installer_ps1.sh` | PowerShell installer under `pwsh` (Linux CI): parse, portable install, config diff/refusal/`-Yes`, `-CertsOnly`, plus simulated-Windows ACL and service install/start/restart with mocks |
 | `tests/test_client_config.sh` | generated client template: real static_host_map/lighthouse/punchy/listen/tun/firewall from the local config, `[server.*]` fallback, and missing-value warnings |
 | `tests/test_edit.sh` | privileged-safe config editing: working copy for read-only/unreadable configs, elevated write-back, timestamped backup, and no-op when nothing changed |
 | `tests/test_import_bundle.sh` | client bundle import: tar.gz extraction, validation, path rebasing, manager.conf creation, overwrite/backup, dry-run, TUI wrapper, CLI, post-import `--start` |
@@ -1247,8 +1327,33 @@ is *already running*, discover the installation and offer to generate
         obvious without opening them.
 - [ ] **Pod/container support** – detect Nebula running under `podman`/`docker` and
       route lifecycle actions through the container runtime instead of `systemctl`.
-- [ ] **macOS `launchd`** service management; **Windows** guidance (WSL documented).
+- [ ] **macOS `launchd` in the TUI** – the bundle's `install.sh` already restarts
+      brew/launchd services; the manager's own service menu is still systemd-only.
+- [x] **Windows native bundle installer** (`install.ps1`) – elevation, key ACLs and
+      `nebula.exe -service install/start` are implemented; a real-host run is
+      tracked in the manual checklist below.
 - [ ] Optional `nebula-cert` JSON health checks / richer diagnostics output.
+
+### 🧪 Manual platform confirmation (needed)
+
+These cannot be proven by the Linux test suite (the Windows service/ACL flow is
+mock-tested under `pwsh`; the mobile flows need real devices). Check them off
+after a first-hand run.
+
+- [ ] **Windows 11 — real host**: unpack a client bundle and run
+      `install.ps1` (first `-NoStart -Yes`, then without `-NoStart`). Confirm:
+      UAC elevation, key ACL (`SYSTEM` + `Administrators`), config diff + backup,
+      `nebula.exe -test`, and `nebula.exe -service install` followed by
+      start/restart of the `Nebula` service. Also confirm `-CertsOnly` updates a
+      certificate without touching `config.yml`.
+- [ ] **Android — real device**: install **Mobile Nebula** (Google Play), sign a
+      device key on the CA host with `sign --in-pub KEY.pub --qr OUT.png`, scan
+      the QR, paste `ca.crt`, add the lighthouse (`10.100.0.1` /
+      `vps.theprof.demo:4545`), enable the site, and confirm `ping` and
+      `*.theprof.mesh` name resolution from another node.
+- [ ] **iPhone/iOS — real device**: same flow through the App Store version:
+      QR/certificate import, `ca.crt`, lighthouse, VPN permission, and a `ping`
+      from a desktop node. Confirm the app version and iOS minimum in the notes.
 
 ---
 

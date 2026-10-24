@@ -1861,20 +1861,24 @@ perform_manager_update() {
         return 1
     fi
 
-    mkdir -p "$tmp/lib"
+    mkdir -p "$tmp/lib/bundle"
     local m
-    for m in ui.sh pki.sh bench.sh system.sh import.sh nebula-manager.conf.template; do
+    for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh nebula-manager.conf.template; do
         curl -fsSL "${REPO_BASE}/lib/${m}" -o "$tmp/lib/${m}" \
             || { log_error "Failed to download lib/${m}"; rm -rf "$tmp"; return 1; }
+    done
+    for m in install.sh install.ps1 README.txt; do
+        curl -fsSL "${REPO_BASE}/lib/bundle/${m}" -o "$tmp/lib/bundle/${m}" \
+            || { log_error "Failed to download lib/bundle/${m}"; rm -rf "$tmp"; return 1; }
     done
 
     local target="${SCRIPT_PATH:-$0}" libdir="${MANAGER_LIB_DIR:-}"
     if path_requires_root "$target"; then
         elevate cp "$entry" "$target" && elevate chmod +x "$target"
-        [[ -n "$libdir" ]] && elevate cp "$tmp/lib/"* "$libdir/"
+        [[ -n "$libdir" ]] && elevate cp -a "$tmp/lib/." "$libdir/"
     else
         cp "$entry" "$target" && chmod +x "$target"
-        [[ -n "$libdir" ]] && cp "$tmp/lib/"* "$libdir/"
+        [[ -n "$libdir" ]] && cp -a "$tmp/lib/." "$libdir/"
     fi
     rm -rf "$tmp"
     log_success "Updated to version v$latest. Please rerun."

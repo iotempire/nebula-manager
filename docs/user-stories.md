@@ -209,12 +209,23 @@ firewall:
       host: any
 ```
 
-On each new machine (✅ today): install Nebula first, then clone the tool and
-import the bundle from Setup:
+On each new machine (✅ today): install Nebula first, then use the
+**self-contained installer** from the bundle (no clone needed):
 
 ```bash
 # install Nebula with your distro's package manager, e.g. on Ubuntu:
 sudo apt install -y nebula
+unzip ~/theprof3.theprof.mesh-nebula-bundle.zip -d ~/nb
+sudo bash ~/nb/install.sh            # installs cert/key/CA + config, restarts nebula.service
+# user-owned test:  bash ~/nb/install.sh --dir ~/nebula --no-start
+```
+
+The installer backs up existing files, **shows a diff and asks** if `config.yml`
+already exists, validates the config with `nebula -test`, and (re)starts the
+service. The classic route still works — clone the manager and import the
+bundle from Setup:
+
+```bash
 git clone https://github.com/<you>/nebula-manager    # brings ./nebula-manager + ./lib
 cd nebula-manager
 ./nebula-manager            # Setup -> Import client bundle -> theprof3...zip
@@ -223,9 +234,12 @@ cd nebula-manager
 The import extracts safely, validates `ca.crt` + the client cert/key, installs
 them and the populated `config.yml` into `/etc/nebula` (elevating only for the
 writes, with backups), creates `nebula-manager.conf`, and reloads straight into
-the main menu. Then start the service and verify:
+the main menu. Then verify (the installer route already restarted the service):
 
 ```bash
+systemctl status nebula            # installer route
+ip -brief addr show nebula1         # TUN address from the config
+# with nebula-manager (either route):
 ./nebula-manager            # Instances -> Service: Start / Stop
 ./nebula-manager diag       # verify TUN ip, UDP socket, cert expiry
 ```
@@ -496,7 +510,8 @@ student-group-1/
   carol-nebula-bundle.zip
   ca.crt
   README.txt
-  install.sh              # tiny helper; detects OS, places files, starts nebula
+  install.sh              # self-contained Linux/macOS installer
+  install.ps1             # Windows installer
 ```
 
 A **profile** bundles: per-member cert/key + `config.yml` template (lighthouse
@@ -513,55 +528,85 @@ portable install/README. This is essentially `cert bundle` × N + shared assets.
 ## Story 2 — The students join
 
 Names: **Alex** (Windows 11), **Bianca** (Ubuntu), **Chen** (macOS), **Dana** (iPhone).
-Desktop students receive `student-group-1/<their>-nebula-bundle.zip` (or the whole
-folder) from Theprof; Dana receives her signed cert + `ca.crt` (and an optional
-QR) for the mobile app instead.
+Desktop students receive their bundle via a **croc code** or an **HTTP URL**.
+Each archive is self-contained — `install.sh` / `install.ps1` plus a
+`README.txt` with the exact one-liners — so students do **not** need to clone
+nebula-manager. (Theprof can pre-fill those commands with
+`cert bundle --share-url … --croc-code …` when he already knows them.) Dana
+receives her signed cert + `ca.crt` (and an optional QR) for the mobile app
+instead.
 
-### Bianca — Ubuntu ✅ (fully scriptable; Debian and Mint work the same)
+### Bianca — Ubuntu ✅ (Debian and Mint work the same)
 
 Per-distribution details (Fedora/RHEL, Arch/CachyOS, SELinux, firewalls) are in
 **[docs/linux-distros.md](linux-distros.md)**.
 
+Bianca only needs Nebula plus `curl`/`unzip` (or `croc`); the bundle's
+`install.sh` does the rest. Theprof shares either a croc code or an HTTP URL:
+
 ```bash
-# Nebula + tooling from the Ubuntu archive
-sudo apt update
-sudo apt install -y nebula gawk curl findutils grep jq sed sudo systemd tar wget \
-                    coreutils iperf3 iputils-ping whiptail zip
-# yq v4 (only the firewall editor needs it): Ubuntu's archive yq is the old Python v3
+sudo apt update && sudo apt install -y nebula curl unzip
+
+# croc (recommended in class: no open ports, works behind eduroam/NAT)
+tmp=$(mktemp -d) && cd "$tmp" && croc --yes CODE-FROM-THEPROF && unzip -q '*.zip' \
+  && sudo bash install.sh
+
+# or HTTP
+tmp=$(mktemp -d) && curl -fsSL https://class.example/bundles/bianca-nebula-bundle.zip \
+  -o "$tmp/b.zip" && unzip -q "$tmp/b.zip" -d "$tmp" && sudo bash "$tmp/install.sh"
+```
+
+The installer backs up existing files, validates `config.yml` with `nebula -test`,
+and starts/restarts `nebula.service`. If `config.yml` already exists it shows a
+diff and asks before touching it. Verify:
+
+```bash
+systemctl status nebula
+ip -brief addr show nebula1        # confirm 10.101.0.x/24
+```
+
+**Optional — the classic manager route.** Clone the repo and import the bundle
+(the extra tooling is only needed for the UI/editor and diagnostics):
+
+```bash
+sudo apt install -y gawk findutils grep jq sed systemd tar wget coreutils \
+                    iperf3 iputils-ping whiptail zip
+# yq v4 is only needed by the firewall editor; Ubuntu's archive yq is v3
 sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
 sudo chmod +x /usr/local/bin/yq
 
 git clone https://github.com/<you>/nebula-manager
 cd nebula-manager
 ./nebula-manager          # Manager Setup -> Import client bundle -> bianca-nebula-bundle.zip
-./nebula-manager          # Instances -> Service: Start / Stop
-./nebula-manager diag     # confirm 10.101.0.x/24 up, cert valid
-```
-
-The import wizard installs the cert/key/CA and the already-populated
-`config.yml` (real `static_host_map`/`lighthouse.hosts`) into `/etc/nebula`,
-creates `nebula-manager.conf`, and reloads into the main menu. Headless:
-
-```bash
-./nebula-manager import --bundle ~/bianca-nebula-bundle.zip --yes
+./nebula-manager diag     # TUN ip, UDP socket, cert expiry
+# headless: ./nebula-manager import --bundle ~/bianca-nebula-bundle.zip --yes
 ```
 
 > **Fedora:** `sudo dnf install -y nebula ... yq ...` (`yq` is v4 there).
 > **Arch/CachyOS:** `sudo pacman -S nebula go-yq libnewt ...`.
-> The rest of the steps are identical.
+> The bundle-installer path needs only `nebula` + `curl`/`unzip` (or `croc`).
 
-### Chen — macOS ⚙️ partial (bash tool works; service = launchd)
+### Chen — macOS ✅ (bundle installer; brew/launchd)
 
-`nebula-manager` runs under bash on macOS, but the **service** layer is systemd-
-only today. ⚙️ Planned: detect `launchd` and manage a `LaunchDaemon`
-(`/Library/LaunchDaemons/net.defined.nebula.plist`) with the same "reason +
-command" sudo prompts. For now:
+`nebula-manager`'s own service layer is systemd-oriented, but the **bundle
+installer** handles macOS: it restarts Nebula via `brew services` when present,
+otherwise it looks for a `*nebula*.plist` launchd label and kickstarts it.
 
 ```bash
 brew install nebula
-./nebula-manager diag                 # diagnostics work
-# place files under /etc/nebula (sudo), then load a LaunchDaemon by hand
+unzip ~/chen-nebula-bundle.zip -d ~/nb
+sudo bash ~/nb/install.sh
+# no service found? the script prints the launchctl command to run
+#   or use: bash ~/nb/install.sh --dir ~/nebula --no-start
 ```
+
+The installer backs up existing files and shows a diff before overwriting an
+existing `config.yml`. Verification: `brew services list` or
+`launchctl print system/<label>`, and `ifconfig nebula0`/`nebula1` for the TUN
+address.
+
+You can still clone nebula-manager for diagnostics (`./nebula-manager diag`),
+but it is not required for the install.
 
 ### Dana — iPhone ✅ (App Store mobile app)
 
@@ -598,16 +643,42 @@ Notes:
 - Android works the same way (see Story 1, Phase 2b); the mobile app is **not**
    on F-Droid.
 
-### Alex — Windows ⚙️ manual today (documented bridge)
+### Alex — Windows ✅ (native PowerShell installer)
 
-nebula-manager is a bash tool; on Windows we ship the bundle plus instructions.
+Install Nebula for Windows first (release zip/MSI; `nebula.exe` must be in
+`PATH` or `C:\Program Files\Nebula\`), then run the bundle's PowerShell installer
+from an **elevated** prompt:
 
-- **Option A (recommended):** WSL2 — follow Bianca's Ubuntu steps inside WSL
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+# other directory:
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dir C:\ProgramData\nebula
+# automation: -Yes ; files only: -NoStart
+```
+
+Or as a one-liner (HTTP example; `croc` works the same way):
+
+```powershell
+$d=Join-Path $env:TEMP 'nebula-bundle'; $z=Join-Path $env:TEMP 'nb.zip';
+Invoke-WebRequest 'https://class.example/bundles/alex-nebula-bundle.zip' -OutFile $z;
+Expand-Archive $z $d -Force;
+powershell -ExecutionPolicy Bypass -File (Join-Path $d 'install.ps1')
+```
+
+The installer:
+
+- backs up existing files and **shows a diff + asks** before replacing an
+  existing `config.yml` (`-Yes` skips the question);
+- restricts the private key to `SYSTEM` + `Administrators`;
+- copies cert/key/CA/config (rewriting `/etc/nebula` to `-Dir`);
+- validates with `nebula.exe -test -config`;
+- installs the `Nebula` service (`nebula.exe -service install -config …`) if
+  needed and starts/restarts it (`-NoStart` skips this).
+
+- **Option B (fallback):** WSL2 — follow Bianca's Ubuntu steps inside WSL
   (Nebula's TUN still binds to the host via WSL networking).
-- **Option B (native):** download `nebula.exe`/`nebula-cert.exe` from the Nebula
-  release matching the bundle, then place `ca.crt`, `alex.*.crt`, `alex.*.key`
-  and `config.yml` (from the bundle) in `C:\ProgramData\nebula\`, and install the
-  Nebula service (`nebula.exe -service install`, `-service start`).
+- Cloning nebula-manager is **not** required for a client install; the classic
+  route still works if you want the TUI/diagnostics.
 
 ⚙️ Planned: `nebula-manager profile` also emits a **per-OS README** and a
 PowerShell snippet so Windows students have copy/paste steps; and a
