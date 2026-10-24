@@ -24,6 +24,18 @@ assert_contains "Enter selects Exit at the top level" "$out" "DEFAULT_EXIT"
 assert_not_contains "Enter does not run a normal item" "$out" "ACTION_RAN"
 assert_contains "menu hint is displayed" "$out" "Menu hint text"
 
+# --- hint in the refresh slot is tolerated (regression) ---------------------
+# `dynamic_menu ... DEPTH "hint"` (no refresh function) used to try to execute
+# the hint as a command and print "No such file or directory".
+out="$(printf 'q\n' | dynamic_menu menu_title menu_labels menu_actions 1 "Hint in the refresh slot" 2>&1)"
+assert_contains "hint in the refresh slot is displayed" "$out" "Hint in the refresh slot"
+assert_not_contains "hint is not executed as a command" "$out" "No such file or directory"
+
+# --- a real refresh function still runs and supplies the prompt -------------
+menu_refresh() { DYNAMIC_MENU_PROMPT="dynamic status line"; }
+out="$(printf 'q\n' | dynamic_menu menu_title menu_labels menu_actions 1 menu_refresh "hint" 2>&1)"
+assert_contains "refresh function prompt is shown" "$out" "dynamic status line"
+
 # --- Enter selects Back in a submenu ----------------------------------------
 menu_labels=("Do nothing")
 menu_actions=("touch $SANDBOX/should_not_exist")

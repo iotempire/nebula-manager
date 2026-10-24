@@ -2394,7 +2394,7 @@ manage_nebula_certs() {
         "cert_store_menu"
         "remove_cert"
     )
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 "" \
         "Create/sign/revoke certificates; manage the CA, groups and the certificate workspace (mesh nodes)."
 }
 

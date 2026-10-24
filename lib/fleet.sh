@@ -820,6 +820,6 @@ fleet_menu() {
     )
     # shellcheck disable=SC2034
     dynamic_menu_functions=( "fleet_croc_tui" "fleet_ssh_tui" "fleet_probe_tui" )
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 "" \
         "Deploy to mesh nodes: croc mass-sharing for classes, or an explicit SSH config/firewall push."
 }

@@ -107,7 +107,7 @@ nebula_maintenance() {
     dynamic_menu_title=("$MENU_PATH" "Updates & Install")
     dynamic_menu_options=("$(get_icon 'download')Update Nebula" "$(get_icon 'schedule')Auto-Update Scheduler" "$(get_icon 'install')Install Script to System" "$(get_icon 'uninstall')${ORANGE}Remove Nebula${RESET}")
     dynamic_menu_functions=("check_for_nebula_update" "auto_update_cron_menu" "ensure_installed_to_bin_path" "remove_nebula")
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 "" \
         "Nebula binary updates, auto-update schedule, install/remove this tool."
 }
 
@@ -153,7 +153,7 @@ server_menu() {
     dynamic_menu_title=("$MENU_PATH" "Nebula Instances")
     dynamic_menu_options=("$(get_icon 'list')List Instances" "$(get_icon 'create')Add Instance" "$(get_icon 'edit')Enable / Disable Instance" "$(get_icon 'start')Service: Start / Stop" "$(get_icon 'delete')Remove Instance")
     dynamic_menu_functions=("server_list" "server_add_tui" "server_toggle_tui" "toggle_nebula_service" "server_remove_tui")
-    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 \
+    dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 "" \
         "Local Nebula installations and their systemd services (start/stop/restart)."
 }
 

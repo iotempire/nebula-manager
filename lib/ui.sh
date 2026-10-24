@@ -996,8 +996,17 @@ dynamic_menu() {
         # Recompute dynamic state (and optionally the prompt) before each draw.
         local prompt=""
         if [[ -n "$refresh" ]]; then
-            "$refresh"
-            prompt="${DYNAMIC_MENU_PROMPT:-}"
+            if declare -F "$refresh" >/dev/null 2>&1; then
+                "$refresh"
+                prompt="${DYNAMIC_MENU_PROMPT:-}"
+            elif [[ -z "$hint" ]]; then
+                # Tolerate the common hint-only call form (`... DEPTH "hint"`).
+                hint="$refresh"
+                refresh=""
+            else
+                debug_info "dynamic_menu: ignoring non-function refresh '$refresh'"
+                refresh=""
+            fi
         fi
         if [[ "$backend" != "plain" ]]; then
             # ---- text-graphical menu ----
