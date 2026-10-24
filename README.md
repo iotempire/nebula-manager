@@ -91,7 +91,7 @@ cd nebula-manager
 mkdir -p nebula-manager/lib/bundle && cd nebula-manager
 base=https://raw.githubusercontent.com/jordanhillis/nebula-manager/refs/heads/main
 curl -fsSL "$base/nebula-manager" -o nebula-manager
-for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh nebula-manager.conf.template; do
+for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh fleet.sh nebula-manager.conf.template; do
   curl -fsSL "$base/lib/$m" -o "lib/$m"
 done
 for m in install.sh install.ps1 README.txt; do
@@ -122,7 +122,7 @@ Nebula Manager checks for required tools on first run and prints an install
 command if any are missing (skippable via `ignore_dependency_check` in the conf).
 
 **Required:** `gawk` (`awk`), `curl`, `findutils` (`find`), `grep`, `jq`, `sed`, `sudo`, `systemd` (`systemctl`), `tar`, `wget`, `coreutils` (`sha256sum`), `iputils-ping`
-**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (peer-to-peer bundle transfer without opening ports)
+**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (fleet mass deployment without opening ports); `nc`/`netcat` (fast SSH port probing; falls back to bash `/dev/tcp`); `ssh` (fleet SSH push and probing)
 
 > 📖 Per-distribution manuals (Ubuntu/Debian/Mint, Fedora/RHEL, Arch/CachyOS,
 > including SELinux and firewall notes): **[docs/linux-distros.md](docs/linux-distros.md)**.
@@ -565,6 +565,7 @@ headless subcommands for scripting — see *Expert / scriptable* below.
 | **Manager Setup** | shows the **detected state** (manager config, Nebula service, cert workspace), then: import/update from this host, **import a client bundle (.zip/.tar.gz)**, create, browse, edit, delete `nebula-manager.conf`, manage instances, pick the certificate workspace |
 | **Instances** | list / add / enable-disable / remove `[server.*]` entries, and start/stop the selected instance's service |
 | **Certificates** | list, create CA, sign, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), revoke, switch workspace |
+| **Fleet** | **croc mass deployment** (one code per student/node), **SSH push** of a config/firewall change, and SSH reachability probing |
 | **Instance Settings** | validate / edit Nebula `config.yml` (service-owned files are edited on a working copy and saved once with a timestamped backup), edit firewall rules with a **group picker + rule templates + explain**, **policy packs** (embed in bundles / apply / export), **name resolution (Nebula DNS)** |
 | **Connectivity** | ping every cert IP; optional `iperf3` test |
 | **Diagnostics** | TUN IP, listening UDP socket, certificate expiry; reads a service-owned config once with temporary sudo and caches the header values |
@@ -673,6 +674,14 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager cert bundle theprof-ge75.theprof.mesh --policy home
 ./nebula-manager policy export --pack home --select group:home --out ./policies/
 ./nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
+
+# Fleet                      (TUI: Fleet)
+./nebula-manager fleet croc --select group:students --policy students
+#   ^ one bundle + one croc code per student; Ctrl-C stops the senders
+./nebula-manager fleet croc --select group:students --policy students --dry-run
+./nebula-manager fleet probe node4
+./nebula-manager fleet ssh node4 --policy home --yes
+./nebula-manager fleet ssh node4 --config ./config.yml --dry-run
 
 # Utilities
 ./nebula-manager paths                  # resolved config / key dirs, info cache + UI backend
@@ -852,6 +861,93 @@ nebula-manager policy apply --pack home --yes        # scripted
 In the TUI, packs live under **Instance Settings ▸ Edit Firewall ▸ Policy packs**,
 where a pack can also be applied to the config currently being edited (the
 firewall diff/confirm still applies on the way out), shown, edited or deleted.
+
+---
+
+## 🚀 Fleet deployment
+
+Two paths, in priority order. **croc** is the recommended classroom path (no open
+ports, works behind eduroam/NAT); **ssh** is for a single node you can already
+log into with a key.
+
+**TUI:** **Main Menu ▸ Fleet**
+
+### Mass deployment with croc (classes)
+
+```bash
+nebula-manager fleet croc --select group:students --policy students
+```
+
+This renders one **self-contained bundle** per selected certificate (cert/key/CA,
+config template, `install.sh`, `install.ps1`, `README.txt`), starts **one `croc
+send` process per bundle** with a code chosen by nebula-manager, and prints:
+
+```text
+Bundles for your fleet (/home/you/fleet-bundles-20261025-101500):
+Node                           croc code                      Bundle
+alice.theprof.mesh             alice-theprof-mesh-3f9a1c2b    alice.theprof.mesh-nebula-bundle.zip
+bob.theprof.mesh               bob-theprof-mesh-7c2e44d1      bob.theprof.mesh-nebula-bundle.zip
+
+Students run:
+  croc alice-theprof-mesh-3f9a1c2b    # alice.theprof.mesh
+  croc bob-theprof-mesh-7c2e44d1      # bob.theprof.mesh
+```
+
+The command keeps waiting (one transfer per code) and reports `Delivered …` as
+each student receives. **Ctrl-C** stops the remaining senders. Per-transfer logs
+are written next to the bundles as `.croc-<node>.log`.
+
+- Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
+  `ip:CIDR`, `cert:NAME`, or `all` (repeatable). Mobile certs (no local `.key`)
+  are skipped with a note.
+- Firewall: `--policy PACK` (e.g. the class policy) or `--firewall
+  host|permissive|default|pack:NAME|skip`. Without either, each node's saved
+  choice from certificate creation (or the last choice) is used, else the
+  detected host firewall.
+- `--out DIR` (default `./fleet-bundles-<timestamp>`), `--code-prefix TEXT`,
+  `--timeout SECONDS` (default: wait forever), `--dry-run` (create bundles and
+  print codes/commands, start no senders).
+- Each student runs the code, extracts the archive and runs the installer:
+  `croc CODE`, then `unzip '*.zip'` / `Expand-Archive`, then
+  `sudo bash install.sh` (or `install.ps1`). The bundle's `README.txt` contains
+the exact lines.
+
+### SSH push to one node
+
+First probe, then push:
+
+```bash
+nebula-manager fleet probe node4
+nebula-manager fleet probe node4 --domain theprof.net --domain netbird.cloud
+# name expansion: node4.<your-cert-domain>, node4.netbird.cloud,
+#                 node4.local, node4  (first open port 22 wins)
+# Tailscale MagicDNS needs its tailnet suffix: --host node4.<tailnet>.ts.net
+# login candidates: current user, root, user (or --user/--host)
+# requires key-based SSH; non-root also needs passwordless sudo
+
+nebula-manager fleet ssh node4 --policy home --yes
+nebula-manager fleet ssh node4 --config ./node4-config.yml --dry-run
+nebula-manager fleet ssh node4 --firewall-file ./policies/node4/firewall.yml
+nebula-manager fleet ssh root@node4.theprof.mesh --firewall permissive --no-restart
+```
+
+What `fleet ssh` does:
+
+1. probes the candidate names and users (as above); if no key login works it
+   offers one interactive user attempt, then prints `ssh-copy-id` guidance;
+2. fetches the remote config (`--remote-config`, default `/etc/nebula/config.yml`);
+3. merges the change **locally** — a policy pack / firewall mode replaces only
+   the `firewall:` section, or `--config FILE` replaces the whole file;
+   `--firewall-file FILE` also accepts a bare firewall mapping (as written by
+   `policy export`);
+4. shows a **unified diff** and asks (unless `--yes`);
+5. uploads with a timestamped remote backup (`<config>.bak.YYYYmmdd-HHMMSS`);
+6. validates with `nebula -test` and restarts `--service` (default
+   `nebula.service`) unless `--no-restart`.
+
+Root logins need no `sudo`; other users must have passwordless sudo for
+unattended changes. `--dry-run` still fetches (read-only) and prints the exact
+commands without changing anything.
 
 ### Global flags
 
@@ -1122,6 +1218,8 @@ What it covers:
 | `tests/test_bundle.sh` | client export: candidate listing, substring/ambiguous matching, default output dir, TUI picker, mode 0600 |
 | `tests/test_bundle_installer.sh` | self-contained bundles: install.sh/install.ps1/README shipped, user-owned install without sudo, config diff + refusal/`--yes`, backups, share one-liners |
 | `tests/test_installer_ps1.sh` | PowerShell installer under `pwsh` (Linux CI): parse, portable install, config diff/refusal/`-Yes`, `-CertsOnly`, plus simulated-Windows ACL and service install/start/restart with mocks |
+| `tests/test_fleet_croc.sh` | fleet croc: selection → bundles, one `croc send --code …` per node, code table, dry-run, mobile-cert skip, policy embedding, unique codes |
+| `tests/test_fleet_ssh.sh` | fleet SSH: name expansion, port probing, user discovery, passwordless-sudo/root handling, remote fetch → local merge → diff → upload/backup/test, dry-run, unreachable guidance |
 | `tests/test_client_config.sh` | generated client template: real static_host_map/lighthouse/punchy/listen/tun/firewall from the local config, `[server.*]` fallback, and missing-value warnings |
 | `tests/test_edit.sh` | privileged-safe config editing: working copy for read-only/unreadable configs, elevated write-back, timestamped backup, and no-op when nothing changed |
 | `tests/test_import_bundle.sh` | client bundle import: tar.gz extraction, validation, path rebasing, manager.conf creation, overwrite/backup, dry-run, TUI wrapper, CLI, post-import `--start` |
@@ -1316,9 +1414,13 @@ is *already running*, discover the installation and offer to generate
       applied locally, or exported per host for an existing fleet.
 - [x] **Certificate-store history** – action log, datestamped backups, optional
       git snapshots (private keys always excluded).
-- [ ] **Remote fleet push** – push a rendered config/policy (and optionally
-      refreshed certificates) to hosts over SSH, using the `policy export`
-      output as the source; keep it explicit, host-scoped and dry-runnable.
+- [x] **Remote fleet push** – `fleet ssh` fetches the remote config, merges a
+      policy/firewall locally, shows a diff, uploads with a timestamped backup,
+      validates and restarts. `fleet croc` serves self-contained bundles with one
+      code per node (the recommended classroom mass-deployment path).
+- [ ] **Real-network confirmation for fleet** – run `fleet croc` between two
+      machines over croc's relay (including behind eduroam/NAT) and run
+      `fleet ssh` against a node with key auth + passwordless sudo.
 - [ ] **Better menu hierarchy** – revisit the top-level grouping once the fleet
       features land (the current rename to *Instances* / *Instance Settings* /
       *Updates & Install* / *Manager Setup* is the surgical first step):

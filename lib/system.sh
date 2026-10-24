@@ -1863,7 +1863,7 @@ perform_manager_update() {
 
     mkdir -p "$tmp/lib/bundle"
     local m
-    for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh nebula-manager.conf.template; do
+    for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh fleet.sh nebula-manager.conf.template; do
         curl -fsSL "${REPO_BASE}/lib/${m}" -o "$tmp/lib/${m}" \
             || { log_error "Failed to download lib/${m}"; rm -rf "$tmp"; return 1; }
     done

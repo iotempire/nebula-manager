@@ -34,6 +34,7 @@ Start the tool and everything is selectable from the text-graphical menus:
 | **Manager Setup** | shows the detected state, then Import/Update / **Import client bundle** / Create / Browse / Edit / Delete config, Manage instances, Certificate Workspace |
 | **Instances** | List / Add / Enable-Disable / Remove `[server.*]`, start/stop the service |
 | **Certificates** | List / Create CA / Sign / View / Expiry / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
+| **Fleet** | **croc mass deployment** (one code per student) / **SSH push** of a config or firewall / SSH reachability probe |
 | **Instance Settings** | Validate / Edit Nebula `config.yml` / Firewall / Name resolution |
 | **Connectivity** | ping all cert IPs (+ optional `iperf3`) |
 | **Diagnostics** | TUN ip, UDP socket, cert expiry |
@@ -471,8 +472,10 @@ $ nebula-manager policy export --pack home --select group:home --out ./policies/
 # ./policies/theprof3.theprof.mesh/README.txt   (scp + yq + restart commands)
 ```
 
-Distribution is deliberately explicit (scp/ansible); nebula-manager does not
-reach into remote hosts. On the machine itself he can also apply a pack
+Distribution is explicit: `fleet ssh NODE --policy home` pushes the change with a
+diff, backup, validation and restart; `fleet croc` serves the bundles to the class
+with one code per node. nebula-manager never touches a remote host unless you run
+one of those commands. On the machine itself he can also apply a pack
 directly (working copy, diff confirmation, backup when elevation is needed):
 
 ```bash
@@ -481,6 +484,46 @@ $ nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 
 Student groups later reuse the same mechanism: a `students` pack with
 `groups: [students]` and per-group rules, embedded into every student bundle.
+
+### Phase 2e — Hand out the class bundles, one code per student (✅ today)
+
+**TUI:** *Fleet ▸ Share student bundles via croc* (or headless):
+
+```bash
+$ nebula-manager fleet croc --select group:students --policy students
+Bundles for your fleet (/home/theprof/fleet-bundles-20261025-101500):
+Node                           croc code                      Bundle
+alice.theprof.mesh             alice-theprof-mesh-3f9a1c2b    alice.theprof.mesh-nebula-bundle.zip
+bob.theprof.mesh               bob-theprof-mesh-7c2e44d1      bob.theprof.mesh-nebula-bundle.zip
+...
+Students run:
+  croc alice-theprof-mesh-3f9a1c2b    # alice.theprof.mesh
+  croc bob-theprof-mesh-7c2e44d1      # bob.theprof.mesh
+```
+
+Each selected certificate gets a **self-contained bundle** (cert/key/CA, config,
+`install.sh`, `install.ps1`, `README.txt`) and its **own croc process**, so there
+is no shared archive and no open port to configure. theprof pastes one line per
+student into the class chat; `Ctrl-C` stops the remaining senders. Mobile certs
+(no local `.key`) are skipped automatically. Add `--dry-run` to create the
+bundles and codes without starting any transfer, or `--timeout 600` to stop
+after ten minutes.
+
+For an **already-installed** node he can push a firewall change over SSH instead
+of handing out a bundle:
+
+```bash
+$ nebula-manager fleet probe node4
+# tries node4.theprof.mesh, node4.netbird.cloud, node4.local, node4;
+# then the current user, root and 'user' (key auth)
+$ nebula-manager fleet ssh node4 --policy home --yes
+# fetches the remote config, merges only firewall:, shows a diff, backs it up,
+# validates with nebula -test and restarts nebula.service
+```
+
+Root logins need no sudo; other users need passwordless sudo. `--dry-run` shows
+the exact remote commands, and `--config FILE` pushes a complete config instead of
+a policy merge.
 
 ### Phase 3 — Two student groups of three machines (⚙️ planned "profiles")
 
@@ -528,13 +571,12 @@ portable install/README. This is essentially `cert bundle` × N + shared assets.
 ## Story 2 — The students join
 
 Names: **Alex** (Windows 11), **Bianca** (Ubuntu), **Chen** (macOS), **Dana** (iPhone).
-Desktop students receive their bundle via a **croc code** or an **HTTP URL**.
-Each archive is self-contained — `install.sh` / `install.ps1` plus a
-`README.txt` with the exact one-liners — so students do **not** need to clone
-nebula-manager. (Theprof can pre-fill those commands with
-`cert bundle --share-url … --croc-code …` when he already knows them.) Dana
-receives her signed cert + `ca.crt` (and an optional QR) for the mobile app
-instead.
+Desktop students receive their **own croc code** (or an HTTP URL). Theprof runs
+`fleet croc --select group:students --policy students`; each student gets a line
+like `croc alice-theprof-mesh-3f9a1c2b`. Each archive is self-contained —
+`install.sh` / `install.ps1` plus a `README.txt` with the exact one-liners — so
+students do **not** need to clone nebula-manager. Dana receives her signed cert +
+`ca.crt` (and an optional QR) for the mobile app instead.
 
 ### Bianca — Ubuntu ✅ (Debian and Mint work the same)
 

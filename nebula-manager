@@ -70,7 +70,7 @@ resolve_lib_dir() {
 }
 
 MANAGER_LIB_DIR="$(resolve_lib_dir)"
-for _mod in ui pki select bench system import policy store; do
+for _mod in ui pki select bench system import policy store fleet; do
     if [[ -r "$MANAGER_LIB_DIR/$_mod.sh" ]]; then
         # shellcheck source=/dev/null
         source "$MANAGER_LIB_DIR/$_mod.sh"
@@ -266,11 +266,11 @@ main_menu() {
         if [ ! -f "${NEBULA_DIR}/config.yml" ]; then
             setup_nebula_config
         fi
-        menu_options=("$(get_icon 'certificate')Certificates (CA, nodes, groups)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'configuration')Instance Settings (config, firewall, DNS)" "$(get_icon 'connectivity')Connectivity (ping nodes)" "$(get_icon 'scan')Diagnostics (TUN, port, expiry)" "$(get_icon 'bench')Benchmarks (iperf3)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'maintenance')Updates & Install (Nebula binary)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
-        menu_option_functions=("manage_nebula_certs" "server_menu" "manage_configuration" "check_node_connectivity" "run_diagnostics_tui" "run_benchmark" "setup_menu" "nebula_maintenance" "exit")
+        menu_options=("$(get_icon 'certificate')Certificates (CA, nodes, groups)" "$(get_icon 'upload')Fleet (croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'configuration')Instance Settings (config, firewall, DNS)" "$(get_icon 'connectivity')Connectivity (ping nodes)" "$(get_icon 'scan')Diagnostics (TUN, port, expiry)" "$(get_icon 'bench')Benchmarks (iperf3)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'maintenance')Updates & Install (Nebula binary)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_option_functions=("manage_nebula_certs" "fleet_menu" "server_menu" "manage_configuration" "check_node_connectivity" "run_diagnostics_tui" "run_benchmark" "setup_menu" "nebula_maintenance" "exit")
     else
-        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'list')Instances (local services)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
-        menu_option_functions=("install_nebula" "server_menu" "setup_menu" "exit")
+        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'upload')Fleet (croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_option_functions=("install_nebula" "fleet_menu" "server_menu" "setup_menu" "exit")
     fi
     menu_title=("$MENU_PATH")
     dynamic_menu menu_title menu_options menu_option_functions 0 instance_context_refresh \
@@ -350,6 +350,16 @@ Commands:
                                   choice from certificate creation.
                                   --share-url/--croc-code fill the one-liners in
                                   the bundle's README.txt.
+  fleet croc [--select SPEC] [--policy PACK|--firewall MODE] [--out DIR]
+                                  Serve a bundle per selected node via croc and
+                                  print one code per node (class mass deployment).
+  fleet ssh TARGET [--policy PACK|--firewall MODE|--firewall-file FILE|
+                    --config FILE] [--yes] [--dry-run] [--no-restart]
+                                  Fetch a remote config, merge the firewall,
+                                  show a diff, upload with a backup, validate and
+                                  restart. Names expand via cert domains/NetBird.
+  fleet probe TARGET [--port N] [--host H] [--user U]
+                                  Test SSH reachability and find a login user.
   rename-group <old> <new>        Replace a group in every certificate that
                                   carries it (re-signs; keeps *.crt.bak).
                                   Options: --cert-dir DIR --yes
@@ -478,6 +488,7 @@ main() {
         firewall|fw)    shift; firewall_cli "$@" ;;
         policy|policies) shift; policy_cli "$@" ;;
         config|conf)    shift; config_cli "$@" ;;
+        fleet|fleets)   shift; fleet_cli "$@" ;;
         server|srv|instance|instances) shift; server_cli "$@" ;;
         import)         shift; import_cli "$@" ;;
         ui)             ui_report ;;

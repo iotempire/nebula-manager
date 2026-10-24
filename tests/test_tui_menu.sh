@@ -75,6 +75,7 @@ dynamic_menu() { capture_menu_labels "$@"; }
 main_menu
 labels="$(cat "$SANDBOX/main_labels.txt")"
 assert_contains "main menu: Instances entry"          "$labels" "Instances"
+assert_contains "main menu: Fleet entry"              "$labels" "Fleet"
 assert_contains "main menu: Instance Settings entry"  "$labels" "Instance Settings"
 assert_contains "main menu: Manager Setup entry"      "$labels" "Manager Setup"
 assert_contains "main menu: Updates & Install entry"  "$labels" "Updates & Install"

@@ -869,6 +869,10 @@ Certificates ▸ Bundle / Export Client|bundle export zip client certificate|pki
 Certificates ▸ Revoke Certificate|revoke blocklist cert certificate|revoke_cert
 Certificates ▸ Switch Workspace|workspace cert dir keys store|select_cert_workspace
 Certificates ▸ Store Backup / Git|backup git history store cert|cert_store_menu
+Fleet|deploy fleet students share croc ssh push remote nodes|fleet_menu
+Fleet ▸ Share bundles via croc|students bundles codes share croc classroom|fleet_croc_tui
+Fleet ▸ Push over SSH|push config firewall remote host ssh|fleet_ssh_tui
+Fleet ▸ Probe SSH|reachability port 22 user login ssh|fleet_probe_tui
 Instances|servers instances service systemd start stop restart|server_menu
 Instances ▸ List|list servers instances|server_list
 Instances ▸ Add|add server instance|server_add_tui

@@ -11,6 +11,7 @@ NM="$REPO_ROOT/nebula-manager"
 # --- version / help ---
 assert_contains "--version prints version" "$("$NM" --version)" "Nebula Manager v"
 assert_contains "--help prints usage"     "$("$NM" --help)"    "Usage:"
+assert_contains "fleet help lists croc"   "$("$NM" fleet --help 2>&1)" "fleet croc"
 
 # --- paths subcommand (also exercises directory resolution through the entry) ---
 out="$("$NM" paths)"
