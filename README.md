@@ -183,7 +183,15 @@ prompts come with **suggestions derived from the existing certs**:
   common suffix among existing cert names (e.g. `theprof-framework.theprof.mesh` when
   your certs are `vps.theprof.mesh`, `theprof-ge75.theprof.mesh`, …);
 - **IP** — the **next free /24 host** in the overlay network used by most of your
-  certs (e.g. `10.100.0.1`, `.2`, `.3` present → `10.100.0.4/24`).
+  certs (e.g. `10.100.0.1`, `.2`, `.3` present → `10.100.0.4/24`);
+- **groups** — the workspace's existing groups are listed with member counts
+  (e.g. `existing: instructor (3), lighthouse (1)`), and **Enter reuses the last
+  groups you used in this workspace** (node and mobile selections are tracked
+  separately). With no groups yet it suggests **roles**
+  (`instructor,student`; mobile: `student,mobile`) instead of device types.
+  Type `-` to clear the groups. Invalid input re-prompts, and the last
+  successful choice is remembered under
+  `~/.config/nebula-manager/sign-groups/`.
 
 Press Enter to accept a suggestion or type your own. The name is a free-form
 label (Nebula does not require the domain), but keeping the `.mesh` suffix

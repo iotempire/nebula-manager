@@ -45,6 +45,62 @@ load_cert_dir_selection() {
     [[ -f "$f" ]] && head -n1 "$f"
 }
 
+# Last groups used when signing in a workspace, per kind (node/mobile). Kept
+# outside the certificate store and keyed by the workspace path so different
+# meshes never suggest each other's groups.
+sign_groups_state_file() {
+    local cert_dir="$1" kind="${2:-node}" base h
+    base="$(basename "$cert_dir" 2>/dev/null | tr -c 'A-Za-z0-9._-' '_')"
+    h="$(printf '%s' "$cert_dir" | cksum | awk '{print $1}')"
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/nebula-manager/sign-groups/${base}-${h}-${kind}"
+}
+
+save_sign_groups_selection() {
+    local cert_dir="$1" groups="$2" kind="${3:-node}" f
+    [[ -n "$groups" ]] || return 0
+    f="$(sign_groups_state_file "$cert_dir" "$kind")"
+    mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+    printf '%s\n' "$groups" > "$f" 2>/dev/null || true
+}
+
+load_sign_groups_selection() {
+    local cert_dir="$1" kind="${2:-node}" f
+    f="$(sign_groups_state_file "$cert_dir" "$kind")"
+    [[ -f "$f" ]] && head -n1 "$f"
+}
+
+# Group prompt helpers (kept separate so they can be tested without a TTY).
+cert_groups_example() {
+    if [[ "${1:-node}" == "mobile" ]]; then echo "student,mobile"; else echo "instructor,student"; fi
+}
+
+# Default groups offered on Enter: last used in this workspace, or "mobile".
+cert_groups_default() {
+    local cert_dir="$1" kind="${2:-node}" d
+    d="$(load_sign_groups_selection "$cert_dir" "$kind")"
+    [[ "$kind" == "mobile" && -z "$d" ]] && d="mobile"
+    printf '%s' "$d"
+}
+
+# cert_groups_prompt <cert_dir> [node|mobile]
+cert_groups_prompt() {
+    local cert_dir="$1" kind="${2:-node}" avail="" default example prompt
+    example="$(cert_groups_example "$kind")"
+    if declare -F cert_group_summary >/dev/null; then
+        avail="$(cert_group_summary "$cert_dir")"
+    fi
+    default="$(cert_groups_default "$cert_dir" "$kind")"
+    prompt="Enter groups (comma-separated"
+    if [[ -n "$avail" ]]; then
+        prompt+="; existing: ${avail}"
+    else
+        prompt+="; roles, e.g. ${example}"
+    fi
+    [[ -n "$default" ]] && prompt+="; Enter = ${default}; '-' = none"
+    prompt+="): "
+    printf '%s' "$prompt"
+}
+
 # resolve_cert_dir : print the active certificate workspace directory.
 resolve_cert_dir() {
     if [[ -n "${CERT_DIR_OVERRIDE:-}" ]]; then
@@ -652,9 +708,23 @@ generate_nebula_cert() {
             log_error "Invalid IP address. Please enter a valid IP (e.g., 192.168.222.16/24)."
         fi
     done
-    local groups_hint="servers,desktops"
-    (( cert_is_mobile )) && groups_hint="mobile"
-    read -p "$(show_status 'question') Enter the groups (optional, e.g., ${groups_hint}): " cert_gen_groups
+    local groups_kind="node"
+    (( cert_is_mobile )) && groups_kind="mobile"
+    local groups_example; groups_example="$(cert_groups_example "$groups_kind")"
+    local groups_default; groups_default="$(cert_groups_default "$cert_dir" "$groups_kind")"
+    local groups_prompt; groups_prompt="$(cert_groups_prompt "$cert_dir" "$groups_kind")"
+    while true; do
+        read -p "$(show_status 'question') $groups_prompt" cert_gen_groups \
+            || { log_info "Canceled."; return 1; }
+        [[ -z "$cert_gen_groups" && -n "$groups_default" ]] && cert_gen_groups="$groups_default"
+        [[ "$cert_gen_groups" == "-" ]] && cert_gen_groups=""
+        [[ -z "$cert_gen_groups" ]] && break
+        if _pki_groups_validate_list "$cert_gen_groups"; then
+            cert_gen_groups="$(_pki_groups_normalize "$cert_gen_groups")"
+            break
+        fi
+        log_error "Invalid groups. Use comma-separated names without spaces (e.g. ${groups_example})."
+    done
     read -p "$(show_status 'question') Do you want to include subnets for this certificate? (y/n): " include_subnets_choice
     if [[ "$include_subnets_choice" == "y" ]]; then
         read -p "$(show_status 'question') Enter the subnets in CIDR format (comma-separated, e.g., 192.168.1.0/24,10.0.0.0/16): " cert_gen_subnets
@@ -675,6 +745,7 @@ generate_nebula_cert() {
         SIGN_GROUPS="$cert_gen_groups" SIGN_SUBNETS="$cert_gen_subnets" SIGN_DURATION_H="$cert_gen_duration" \
         SIGN_IN_PUB="$cert_gen_pub" SIGN_QR="$cert_gen_qr" \
         pki_sign; then
+        save_sign_groups_selection "$cert_dir" "$cert_gen_groups" "$groups_kind"
         # Ask which firewall the generated client config should carry. Mobile
         # certificates have no local client config, so skip them. The choice is
         # remembered per node and preselects the bundle flow later.
