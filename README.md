@@ -192,6 +192,12 @@ prompts come with **suggestions derived from the existing certs**:
   Type `-` to clear the groups. Invalid input re-prompts, and the last
   successful choice is remembered under
   `~/.config/nebula-manager/sign-groups/`.
+- **duration** — accepts hours (`8760h`), days (`365d`), weeks (`52w`) or
+  years (`1y`/`10y`); a bare number means hours. Press Enter to inherit the
+  CA's expiration. When recreating a CA in place, its existing name and
+  duration are offered as defaults, so Enter keeps the old lifetime. If the CA
+  is only present in a `backups/` snapshot (for example after an interrupted
+  attempt), the newest backup is used for those defaults.
 
 Press Enter to accept a suggestion or type your own. The name is a free-form
 label (Nebula does not require the domain), but keeping the `.mesh` suffix

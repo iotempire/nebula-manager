@@ -359,31 +359,63 @@ pki_ca_create() {
     local bin; bin="$(pki_cert_bin)" || return 1
     local name="${CA_NAME:?CA name is required}"
     local duration="${CA_DURATION:-999999h}"
+
+    # Validate/normalize the duration before touching the existing CA.
+    if declare -F _normalize_duration_hours >/dev/null; then
+        local norm
+        if norm="$(_normalize_duration_hours "$duration")"; then
+            duration="$norm"
+        else
+            log_error "Invalid CA duration '$duration' (use hours like 87600h, days like 3650d, or years like 10y)."
+            return 2
+        fi
+    fi
+
+    ensure_dir "$cert_dir" || return 1
+    # Generate into a temporary directory inside the store (same filesystem so
+    # the final mv is atomic). A failed run must leave the old CA untouched.
+    local tmpdir
+    tmpdir="$(mktemp -d "$cert_dir/.ca-tmp.XXXXXX")" \
+        || { log_error "Could not create a temporary CA directory in $cert_dir"; return 1; }
     local -a args=("$bin" ca -name "$name" -duration "$duration"
-        -out-key "$cert_dir/ca.key" -out-crt "$cert_dir/ca.crt")
+        -out-key "$tmpdir/ca.key" -out-crt "$tmpdir/ca.crt")
     [[ -n "${CA_GROUPS:-}"  ]] && args+=(-groups "$CA_GROUPS")
     [[ -n "${CA_IPS:-}"     ]] && args+=(-ips "$CA_IPS")
     [[ -n "${CA_SUBNETS:-}" ]] && args+=(-subnets "$CA_SUBNETS")
     [[ "${CA_ENCRYPT:-n}" == "y" ]] && args+=(-encrypt)
 
-    ensure_dir "$cert_dir" || return 1
     debug_explain "Creating a certificate authority: ca.crt is the public trust anchor and ca.key signs every client certificate."
-    debug_explain "Keep ca.key secret and never copy it to a client; an existing CA is snapshotted first."
-    # Preserve the old CA (if any) before regenerating it.
+    debug_explain "Keep ca.key secret and never copy it to a client; the new CA is written to a temporary directory and the old one is only replaced on success."
+    if ! debug_run "${args[@]}"; then
+        rm -rf "$tmpdir"
+        log_error "Failed to generate CA. The previous CA (if any) was left untouched."
+        return 1
+    fi
+
+    # Snapshot the old CA, then install the new one. Both mvs are within the
+    # certificate store, so they are atomic renames.
     if declare -F cert_store_snapshot_before >/dev/null; then
         cert_store_snapshot_before "$cert_dir" "ca-create $name" \
             "$cert_dir/ca.crt" "$cert_dir/ca.key" || true
     fi
-    rm -f "$cert_dir/ca.crt" "$cert_dir/ca.key"
-    if debug_run "${args[@]}"; then
-        if declare -F cert_store_log >/dev/null; then
-            cert_store_log "$cert_dir" "ca-create name=\"$name\" duration=\"$duration\""
-        fi
-        log_success "CA generated: $cert_dir/ca.key, $cert_dir/ca.crt"
-        return 0
+    if ! mv -f "$tmpdir/ca.crt" "$cert_dir/ca.crt"; then
+        log_error "Could not install $cert_dir/ca.crt (the old CA is in the snapshot)."
+        rm -rf "$tmpdir"
+        return 1
     fi
-    log_error "Failed to generate CA."
-    return 1
+    if ! mv -f "$tmpdir/ca.key" "$cert_dir/ca.key"; then
+        log_error "Could not install $cert_dir/ca.key (the old CA is in the snapshot)."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    chmod 644 "$cert_dir/ca.crt" 2>/dev/null || true
+    chmod 600 "$cert_dir/ca.key" 2>/dev/null || true
+    rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
+    if declare -F cert_store_log >/dev/null; then
+        cert_store_log "$cert_dir" "ca-create name=\"$name\" duration=\"$duration\""
+    fi
+    log_success "CA generated: $cert_dir/ca.key, $cert_dir/ca.crt"
+    return 0
 }
 
 # Non-interactive cert signing. Consumes (via environment):
@@ -477,11 +509,64 @@ pki_sign() {
     return 1
 }
 
+# _normalize_duration_hours <value> ; convert to whole hours ("Nh").
+# Accepts hours (720 or 720h), days (30d), weeks (4w) and years (10y = 365d).
+# Returns 1 for empty, zero, fractional or unknown values.
+_normalize_duration_hours() {
+    local v="${1:-}" n unit
+    v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+    v="${v//[[:space:]]/}"
+    [[ -n "$v" ]] || return 1
+    if [[ "$v" =~ ^([0-9]+)$ ]]; then
+        n="${BASH_REMATCH[1]}"; unit=h
+    elif [[ "$v" =~ ^([0-9]+)([hdwy])$ ]]; then
+        n="${BASH_REMATCH[1]}"; unit="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+    (( n > 0 )) || return 1
+    case "$unit" in
+        h) ;;
+        d) n=$(( n * 24 )) ;;
+        w) n=$(( n * 168 )) ;;
+        y) n=$(( n * 8760 )) ;;
+        *) return 1 ;;
+    esac
+    printf '%sh\n' "$n"
+}
+
 # Interactive CA generation (TUI wrapper)
 generate_nebula_ca() {
     local cert_dir; cert_dir="$(resolve_cert_dir)"
     local ca_key="$cert_dir/ca.key" ca_crt="$cert_dir/ca.crt"
     ensure_dir "$cert_dir" || { log_error "Nebula directory $cert_dir does not exist."; return 1; }
+
+    # Defaults from an existing CA (useful when recreating it in place). If the
+    # workspace CA is missing (e.g. after a failed create), fall back to the
+    # newest CA backup so the old name/duration are still offered.
+    local ca_name="" ca_duration="" ca_groups="" ca_ips="" ca_subnets=""
+    local ca_name_default="" ca_duration_default="" ca_groups_default="" ca_ips_default="" ca_subnets_default=""
+    local existing_json="" existing_ca="$ca_crt"
+    if [[ ! -f "$existing_ca" ]]; then
+        existing_ca="$(ls -1dt "$cert_dir"/backups/*/ca.crt 2>/dev/null | head -n1 || true)"
+    fi
+    if [[ -n "$existing_ca" && -f "$existing_ca" ]]; then
+        existing_json="$(nebula_cert_json "$(dirname "$(pki_cert_bin)")" "$existing_ca" 2>/dev/null || true)"
+        if [[ -n "$existing_json" ]]; then
+            [[ "$existing_ca" != "$ca_crt" ]] && log_info "Using CA defaults from backup: $existing_ca"
+            ca_name_default="$(jq -r '.details.name // ""' <<<"$existing_json" 2>/dev/null)"
+            ca_groups_default="$(jq -r '.details.groups // [] | join(",")' <<<"$existing_json" 2>/dev/null)"
+            ca_ips_default="$(jq -r '.details.ips // [] | join(",")' <<<"$existing_json" 2>/dev/null)"
+            ca_subnets_default="$(jq -r '.details.subnets // [] | join(",")' <<<"$existing_json" 2>/dev/null)"
+            local nb na secs
+            nb="$(jq -r '.details.notBefore // ""' <<<"$existing_json" 2>/dev/null)"
+            na="$(jq -r '.details.notAfter // ""' <<<"$existing_json" 2>/dev/null)"
+            if [[ -n "$nb" && -n "$na" ]]; then
+                secs=$(( $(date -d "$na" +%s 2>/dev/null || echo 0) - $(date -d "$nb" +%s 2>/dev/null || echo 0) ))
+                (( secs > 0 )) && ca_duration_default="$(( secs / 3600 ))h"
+            fi
+        fi
+    fi
 
     if [[ -f "$ca_key" && -f "$ca_crt" ]]; then
         log_info "CA already exists:"
@@ -489,18 +574,53 @@ generate_nebula_ca() {
         read -p "$(show_status 'question') CA already exists. Do you want to overwrite it? (y/n): " overwrite
         [[ "$overwrite" != "y" ]] && { log_info "CA generation canceled."; return; }
     fi
-    local ca_name
+
+    local ca_name_input
     while [[ -z "$ca_name" ]]; do
-        read -p "$(show_status 'question') Enter the CA name (required): " ca_name
+        if [[ -n "$ca_name_default" ]]; then
+            read -p "$(show_status 'question') Enter the CA name [${ca_name_default}]: " ca_name_input \
+                || { log_info "Canceled."; return 1; }
+            ca_name="${ca_name_input:-$ca_name_default}"
+        else
+            read -p "$(show_status 'question') Enter the CA name (required): " ca_name \
+                || { log_info "Canceled."; return 1; }
+        fi
     done
-    read -p "$(show_status 'question') Enter the duration (default 999999h, press enter to skip): " ca_duration
-    read -p "$(show_status 'question') Enter groups (optional, comma-separated, press enter to skip): " ca_groups
-    read -p "$(show_status 'question') Enter IPs (optional, comma-separated CIDR, press enter to skip): " ca_ips
-    read -p "$(show_status 'question') Enter subnets (optional, comma-separated CIDR, press enter to skip): " ca_subnets
+
+    local ca_duration_input norm
+    ca_duration_default="${ca_duration_default:-999999h}"
+    while true; do
+        read -p "$(show_status 'question') Enter the duration (e.g. 10y, 3650d, 87600h; default ${ca_duration_default}): " ca_duration_input \
+            || { log_info "Canceled."; return 1; }
+        if [[ -z "$ca_duration_input" ]]; then
+            ca_duration="$ca_duration_default"; break
+        fi
+        if norm="$(_normalize_duration_hours "$ca_duration_input")"; then
+            ca_duration="$norm"; break
+        fi
+        log_error "Invalid duration. Use hours (87600h), days (3650d), weeks (520w), or years (10y)."
+    done
+
+    local prompt
+    prompt="Enter groups (optional, comma-separated, press enter to skip)"
+    [[ -n "$ca_groups_default" ]] && prompt+=" [${ca_groups_default}]"
+    read -p "$(show_status 'question') ${prompt}: " ca_groups
+    [[ -z "$ca_groups" ]] && ca_groups="$ca_groups_default"
+
+    prompt="Enter IPs (optional, comma-separated CIDR, press enter to skip)"
+    [[ -n "$ca_ips_default" ]] && prompt+=" [${ca_ips_default}]"
+    read -p "$(show_status 'question') ${prompt}: " ca_ips
+    [[ -z "$ca_ips" ]] && ca_ips="$ca_ips_default"
+
+    prompt="Enter subnets (optional, comma-separated CIDR, press enter to skip)"
+    [[ -n "$ca_subnets_default" ]] && prompt+=" [${ca_subnets_default}]"
+    read -p "$(show_status 'question') ${prompt}: " ca_subnets
+    [[ -z "$ca_subnets" ]] && ca_subnets="$ca_subnets_default"
+
     read -p "$(show_status 'question') Use encryption for the private key? (y/n, default n): " use_encrypt
     [[ "$use_encrypt" == "y" ]] && CA_ENCRYPT="y" || CA_ENCRYPT="n"
 
-    CERT_DIR="$cert_dir" CA_NAME="$ca_name" CA_DURATION="${ca_duration:-999999h}" \
+    CERT_DIR="$cert_dir" CA_NAME="$ca_name" CA_DURATION="$ca_duration" \
         CA_GROUPS="$ca_groups" CA_IPS="$ca_ips" CA_SUBNETS="$ca_subnets" CA_ENCRYPT="$CA_ENCRYPT" \
         pki_ca_create
 }
@@ -729,12 +849,16 @@ generate_nebula_cert() {
     if [[ "$include_subnets_choice" == "y" ]]; then
         read -p "$(show_status 'question') Enter the subnets in CIDR format (comma-separated, e.g., 192.168.1.0/24,10.0.0.0/16): " cert_gen_subnets
     fi
+    local cert_gen_duration_input norm
     while true; do
-        read -p "$(show_status 'question') Set certificate duration in hours (press Enter to skip and inherit CA expiration): " cert_gen_duration \
+        read -p "$(show_status 'question') Set certificate duration (e.g. 8760h, 365d, 1y; press Enter to inherit CA expiration): " cert_gen_duration_input \
             || break
-        [[ -z "$cert_gen_duration" ]] && break
-        [[ "$cert_gen_duration" =~ ^[0-9]+$ ]] && break
-        log_error "Please enter a whole number of hours (e.g., 720), or press Enter to skip."
+        [[ -z "$cert_gen_duration_input" ]] && break
+        if norm="$(_normalize_duration_hours "$cert_gen_duration_input")"; then
+            cert_gen_duration="${norm%h}"   # pki_sign appends the trailing 'h'
+            break
+        fi
+        log_error "Invalid duration. Use hours (8760h), days (365d), weeks (52w), or years (1y), or press Enter to inherit the CA."
     done
     if (( cert_is_mobile )); then
         local qr_default="$cert_dir/$cert_gen_name.png"
