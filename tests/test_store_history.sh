@@ -140,7 +140,7 @@ out="$(bash "$REPO_ROOT/nebula-manager" cert store status --cert-dir "$keys" 2>&
 assert_contains "CLI status works" "$out" "Certificate store:"
 assert_contains "CLI status reports backups" "$out" "Backup folders:"
 
-out="$(bash "$REPO_ROOT/nebula-manager" store log -n 5 --cert-dir "$keys" 2>&1)"
+out="$(bash "$REPO_ROOT/nebula-manager" store log -n 50 --cert-dir "$keys" 2>&1)"
 assert_contains "top-level store alias works" "$out" "sign name="
 
 before="$(backup_count)"

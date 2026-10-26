@@ -320,6 +320,25 @@ nebula_cert_json() {
         ' 2>/dev/null
 }
 
+# _pki_pub_from_cert <bin_path> <cert> <out_pub>
+# Rebuild the NEBULA X25519 public-key PEM from the certificate's publicKey
+# field. This lets us re-sign a certificate without changing (or losing) the
+# device's existing private key.
+_pki_pub_from_cert() {
+    local bin_path="$1" cert="$2" out="$3" hex bytes i
+    hex="$(nebula_cert_json "$bin_path" "$cert" 2>/dev/null | jq -r '.publicKey // empty' 2>/dev/null)"
+    [[ -n "$hex" ]] || return 1
+    bytes=""
+    for ((i = 0; i < ${#hex}; i += 2)); do
+        bytes+="\\x${hex:i:2}"
+    done
+    {
+        printf '%s\n' '-----BEGIN NEBULA X25519 PUBLIC KEY-----'
+        printf '%b' "$bytes" | base64 | tr -d '\n'
+        printf '\n%s\n' '-----END NEBULA X25519 PUBLIC KEY-----'
+    } > "$out"
+}
+
 # Locate the CA, preferring the workspace itself, then the legacy server dir.
 find_ca_crt() {
     local dir="${1:-$(resolve_cert_dir)}"
@@ -444,7 +463,7 @@ pki_sign() {
     local overwrite=0 used_pub=no
     [[ -f "$out_crt" || -f "$out_key" ]] && overwrite=1
     [[ -n "$in_pub" ]] && used_pub=yes
-    if (( overwrite )) && declare -F cert_store_snapshot_before >/dev/null; then
+    if (( overwrite )) && [[ "${SIGN_SKIP_SNAPSHOT:-0}" != 1 ]] && declare -F cert_store_snapshot_before >/dev/null; then
         cert_store_snapshot_before "$cert_dir" "sign $name (overwrite)" "$out_crt" "$out_key" || true
     fi
     debug_explain "Signing '$name' for overlay IP(s) '$ip' with groups '${SIGN_GROUPS:-none}' using the CA in $cert_dir."
@@ -460,7 +479,7 @@ pki_sign() {
     tmpdir="$(mktemp -d)" || return 1
     out_tmp="$tmpdir/$name.crt"
     key_tmp="$tmpdir/$name.key"
-    local -a args=("$bin" sign -name "$name" -ip "$ip"
+    local -a args=("$bin" sign -name "$name" -networks "$ip"
         -ca-crt "$ca_crt" -ca-key "$ca_key"
         -out-crt "$out_tmp")
     if [[ -n "$in_pub" ]]; then
@@ -470,7 +489,7 @@ pki_sign() {
     fi
     [[ -n "${SIGN_DURATION_H:-}" ]] && args+=(-duration "${SIGN_DURATION_H}h")
     [[ -n "${SIGN_GROUPS:-}"     ]] && args+=(-groups "$SIGN_GROUPS")
-    [[ -n "${SIGN_SUBNETS:-}"    ]] && args+=(-subnets "$SIGN_SUBNETS")
+    [[ -n "${SIGN_SUBNETS:-}"    ]] && args+=(-unsafe-networks "$SIGN_SUBNETS")
     [[ -n "${SIGN_QR:-}"         ]] && args+=(-out-qr "$SIGN_QR")
 
     ensure_dir "$cert_dir" || { rm -rf "$tmpdir"; return 1; }
@@ -876,6 +895,12 @@ generate_nebula_cert() {
         if (( ! cert_is_mobile )) && declare -F node_fw_choose_tui >/dev/null; then
             node_fw_choose_tui "$cert_gen_name" "$cert_dir" node >/dev/null || true
         fi
+        # Keep a ready-to-deploy client config next to the certificate so the
+        # bundle/export step can reuse it instead of re-detecting everything.
+        if (( ! cert_is_mobile )) && declare -F pki_node_config_write_for_fw >/dev/null; then
+            pki_node_config_write_for_fw "$cert_gen_name" "$cert_dir" 0 || \
+                log_warn "Could not generate the node config yet; run Certificates > Node Client Configs to retry."
+        fi
         return 0
     fi
     return 1
@@ -1029,6 +1054,12 @@ view_cert_details() {
     else
         log_error "Missing key file: $key_file"
     fi
+    local node_cfg="$certs_dir/configs/$cert_name.yml"
+    if [[ -s "$node_cfg" ]]; then
+        echo -e "\n${YELLOW}Node config:${RESET} $node_cfg"
+    else
+        echo -e "\n${YELLOW}Node config:${RESET} (none - use Certificates > Node Client Configs to generate it)"
+    fi
     if [[ -n "$ca_cert_file" && -f "$ca_cert_file" ]]; then
         echo -e "\n${BG_GREEN}${BOLD}${WHITE} CA CERTIFICATE — Copy from BEGIN to END ${RESET}"
         echo -e "${YELLOW}File: ca.crt${RESET}"
@@ -1064,6 +1095,10 @@ pki_remove() {
             cert_store_snapshot_before "$certs_dir" "remove $name" "$crt_file" "$key_file" || true
         fi
         rm -f "$crt_file" "$key_file" && log_success "Removed $crt_file and $key_file."
+        local node_cfg; node_cfg="$certs_dir/configs/$name.yml"
+        if [[ -f "$node_cfg" ]] && rm -f "$node_cfg"; then
+            log_info "Removed the node config: $node_cfg"
+        fi
         if declare -F cert_store_log >/dev/null; then
             cert_store_log "$certs_dir" "remove name=\"$name\" snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
         fi
@@ -1526,6 +1561,7 @@ pki_cert_is_lighthouse() {
 # policy-pack path (4th arg) replaces the firewall section.
 pki_write_client_config() {
     local outfile="$1" name="$2" cert_dir="${3:-$(resolve_cert_dir)}" policy_path="${4:-}"
+    local label="${5:-config.yml.template}"
     pki_detect_network_config "$cert_dir"
     if [[ -n "$policy_path" ]]; then
         [[ -f "$policy_path" ]] || { log_error "Policy pack not found: $policy_path"; return 1; }
@@ -1538,7 +1574,17 @@ pki_write_client_config() {
     local interval="${PKI_NET_INTERVAL:-60}"
     local port="${PKI_NET_LISTEN_PORT:-0}"
     if (( is_lh )) && [[ "$port" == "0" || -z "$port" ]]; then
-        port="${NEBULA_DEFAULT_PORT:-4242}"
+        # A lighthouse must listen on its advertised public port. When the local
+        # config only knows the client side (listen.port: 0), derive the port
+        # from this lighthouse's static_host_map entry (e.g. host:4545).
+        local own_ip own_ep
+        own_ip="$(_pki_cert_ip_for_name "$name" "$cert_dir")"
+        own_ep="$(_pki_static_for_ip "$own_ip")"
+        if [[ "$own_ep" =~ :([0-9]+)$ ]]; then
+            port="${BASH_REMATCH[1]}"
+        else
+            port="${NEBULA_DEFAULT_PORT:-4242}"
+        fi
     fi
     local tun="${PKI_NET_TUN:-nebula1}"
 
@@ -1549,7 +1595,7 @@ pki_write_client_config() {
         log_warn "Generated client config is incomplete - could not determine:"
         local m
         for m in "${PKI_NET_MISSING[@]}"; do log_warn "  - $m"; done
-        log_warn "Review config.yml.template in the bundle before installing it."
+        log_warn "Review $label before installing it."
     fi
 
     {
@@ -1614,6 +1660,211 @@ pki_write_client_config() {
 
         printf '\ntun:\n  dev: %s\n' "$tun"
     } > "$outfile"
+}
+
+# --- per-node client configs -------------------------------------------------
+# Each certificate can carry its own ready-to-use client config in the store:
+#   <cert-dir>/configs/<name>.yml
+# It is generated when the certificate is signed (or on demand) and reused by
+# `cert bundle`, so exporting never silently invents network settings twice.
+# Everything is user-owned: no sudo unless the store itself is privileged.
+
+pki_node_config_path() {
+    local name="${1:?certificate name required}" cert_dir="${2:-$(resolve_cert_dir)}"
+    printf '%s/configs/%s.yml' "$cert_dir" "$name"
+}
+
+# pki_node_config_policy <cert> ; print the policy file for the saved firewall
+# choice. Prints nothing for host/skip (the detected firewall is used). Sets
+# PKI_NODE_CONFIG_TMP=1 and PKI_NODE_CONFIG_POLICY when a temp file was made.
+pki_node_config_policy() {
+    local cert="${1:-}" sel mode pack
+    PKI_NODE_CONFIG_TMP=0
+    PKI_NODE_CONFIG_POLICY=""
+    declare -F node_fw_get >/dev/null || return 0
+    sel="$(node_fw_get "$cert" 2>/dev/null || true)"
+    [[ -n "$sel" ]] || return 0
+    IFS=$'\t' read -r mode pack <<<"$sel"
+    case "$mode" in
+        pack)
+            PKI_NODE_CONFIG_POLICY="$(policy_resolve "$pack" 2>/dev/null || true)"
+            [[ -n "$PKI_NODE_CONFIG_POLICY" ]] || \
+                log_warn "Policy pack '$pack' not found; using the detected firewall for $cert."
+            ;;
+        permissive|default)
+            PKI_NODE_CONFIG_POLICY="$(node_fw_render_policy "$mode" 2>/dev/null || true)"
+            [[ -n "$PKI_NODE_CONFIG_POLICY" ]] && PKI_NODE_CONFIG_TMP=1
+            ;;
+    esac
+    return 0
+}
+
+# pki_node_config_write <name> [cert_dir] [policy_path] [force]
+# Render (or keep) <cert-dir>/configs/<name>.yml. By default an existing file is
+# left alone so hand edits survive re-signs; force=1 regenerates it.
+pki_node_config_write() {
+    local name="${1:?certificate name required}"
+    local cert_dir="${2:-$(resolve_cert_dir)}" policy="${3:-}" force="${4:-0}"
+    local path dir tmp
+    path="$(pki_node_config_path "$name" "$cert_dir")"
+    dir="$(dirname "$path")"
+    if [[ -s "$path" && "$force" != 1 ]]; then
+        debug_info "node config exists: $path (kept; regenerate to refresh)"
+        return 0
+    fi
+    # Regenerating a hand-edited config is destructive: keep the old one in the
+    # store history (git commit or backups/<timestamp>-node-config-*).
+    if [[ -s "$path" ]] && declare -F cert_store_snapshot_before >/dev/null; then
+        CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
+        cert_store_snapshot_before "$cert_dir" "node-config $name (overwrite)" "$path" || true
+    fi
+    # A root-owned store (e.g. /etc/nebula) needs one elevated write per file.
+    # Render in a user-writable temp file first; only the install is elevated.
+    local privileged=0
+    if declare -F path_requires_root >/dev/null && path_requires_root "$dir"; then
+        privileged=1
+    fi
+    if (( privileged )); then
+        tmp="$(mktemp "${TMPDIR:-/tmp}/nm-$name.yml.XXXXXX")" || return 1
+    else
+        ensure_dir "$dir" || { log_error "Cannot create $dir"; return 1; }
+        tmp="$(mktemp "$dir/.$name.yml.XXXXXX")" || return 1
+    fi
+    if ! pki_write_client_config "$tmp" "$name" "$cert_dir" "$policy" "configs/$name.yml"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if (( privileged )); then
+        if ! elevate mkdir -p "$dir" || ! elevate cp "$tmp" "$path"; then
+            log_error "Cannot write $path"
+            rm -f "$tmp"
+            return 1
+        fi
+        elevate chmod 600 "$path" 2>/dev/null || true
+        rm -f "$tmp"
+    elif ! mv -f "$tmp" "$path"; then
+        log_error "Cannot write $path"
+        rm -f "$tmp"
+        return 1
+    fi
+    [[ "$privileged" == 1 ]] || chmod 600 "$path" 2>/dev/null || true
+    if declare -F cert_store_log >/dev/null; then
+        CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
+        cert_store_log "$cert_dir" "node-config name=\"$name\" force=$force snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
+    fi
+    if [[ "$force" == 1 ]]; then
+        log_success "Node config refreshed: $path"
+    else
+        log_success "Node config written: $path"
+    fi
+    return 0
+}
+
+# Convenience wrapper: use the firewall remembered for this certificate.
+pki_node_config_write_for_fw() {
+    local name="${1:?certificate name required}"
+    local cert_dir="${2:-$(resolve_cert_dir)}" force="${3:-0}"
+    pki_node_config_policy "$name"
+    local policy="$PKI_NODE_CONFIG_POLICY" tmp=""
+    [[ "$PKI_NODE_CONFIG_TMP" == 1 ]] && tmp="$policy"
+    pki_node_config_write "$name" "$cert_dir" "$policy" "$force"
+    local rc=$?
+    [[ -n "$tmp" ]] && rm -f "$tmp"
+    return $rc
+}
+
+# List local certificates and whether they have a stored client config.
+pki_node_config_list() {
+    local cert_dir="${1:-$(resolve_cert_dir)}" name ips groups path found=0
+    [[ -d "$cert_dir" ]] || { log_error "Certificate directory not found: $cert_dir"; return 1; }
+    printf '%-34s %-18s %-22s %s\n' "Certificate" "IP(s)" "Groups" "Node config"
+    while IFS=$'\t' read -r name ips groups; do
+        [[ -n "$name" ]] || continue
+        path="$(pki_node_config_path "$name" "$cert_dir")"
+        if [[ -s "$path" ]]; then
+            found=1
+            printf '%-34s %-18s %-22s %s\n' "$name" "${ips:-N/A}" "${groups//,/:}" "$path"
+        else
+            printf '%-34s %-18s %-22s %s\n' "$name" "${ips:-N/A}" "${groups//,/:}" "(missing)"
+        fi
+    done < <(pki_bundle_candidates "$cert_dir")
+    (( found )) || log_info "No node configs yet - create one with: nebula-manager cert config generate <name>"
+    return 0
+}
+
+# Ensure/refresh a config for every local certificate (mobile certs have no
+# client config and are skipped by pki_bundle_candidates).
+pki_node_config_refresh_all() {
+    local cert_dir="${1:-$(resolve_cert_dir)}" force="${2:-0}"
+    local name ips groups ok=0 failed=0
+    while IFS=$'\t' read -r name ips groups; do
+        [[ -n "$name" ]] || continue
+        if pki_node_config_write_for_fw "$name" "$cert_dir" "$force"; then
+            ok=$((ok + 1))
+        else
+            failed=$((failed + 1))
+        fi
+    done < <(pki_bundle_candidates "$cert_dir")
+    log_info "Node configs: $ok ready, $failed failed."
+    (( failed == 0 ))
+}
+
+# Pick a certificate that has a local key (used by the node-config TUI).
+pki_node_config_pick() {
+    local cert_dir="${1:-$(resolve_cert_dir)}" name ips groups desc path
+    local -a pairs=()
+    while IFS=$'\t' read -r name ips groups; do
+        [[ -n "$name" ]] || continue
+        path="$(pki_node_config_path "$name" "$cert_dir")"
+        desc="${ips:-no IP}"
+        [[ -n "$groups" ]] && desc+=" [${groups//,/:}]"
+        [[ -s "$path" ]] && desc+=" - config" || desc+=" - no config"
+        pairs+=( "$name" "$desc" )
+    done < <(pki_bundle_candidates "$cert_dir")
+    (( ${#pairs[@]} )) || { log_warn "No certificates with a local private key in $cert_dir."; return 1; }
+    ui_menu "Node client config" "Select a certificate in $cert_dir:" "${pairs[@]}"
+}
+
+# TUI: generate, show, edit or refresh per-node client configs.
+pki_node_config_menu_tui() {
+    local cert_dir; cert_dir="$(resolve_cert_dir)"
+    ensure_dir "$cert_dir" >/dev/null 2>&1 || true
+    while true; do
+        local choice name path
+        choice="$(ui_menu "Node client configs" \
+            "Ready-to-deploy config.yml files for individual nodes ($cert_dir/configs)." \
+            edit "Edit the config for one certificate" \
+            show "Show the config for one certificate" \
+            regen "Regenerate the config for one certificate" \
+            regen-all "Regenerate configs for every local certificate" \
+            list "List node configs")" || return 0
+        case "$choice" in
+            list)
+                pki_node_config_list "$cert_dir"
+                ;;
+            edit|show|regen)
+                name="$(pki_node_config_pick "$cert_dir")" || continue
+                [[ -n "$name" ]] || continue
+                path="$(pki_node_config_path "$name" "$cert_dir")"
+                if [[ "$choice" == "regen" ]]; then
+                    pki_node_config_write_for_fw "$name" "$cert_dir" 1 || continue
+                fi
+                [[ -s "$path" ]] || pki_node_config_write_for_fw "$name" "$cert_dir" 0 || continue
+                if [[ "$choice" == "show" ]]; then
+                    printf '\n--- %s ---\n' "$path"
+                    cat "$path"
+                else
+                    debug_explain "Opening $path in ${EDITOR:-${VISUAL:-vi}} (user-owned; no root needed)."
+                    "${EDITOR:-${VISUAL:-vi}}" "$path"
+                    log_info "Saved node config: $path"
+                fi
+                ;;
+            regen-all)
+                pki_node_config_refresh_all "$cert_dir" 1
+                ;;
+            *) return 0 ;;
+        esac
+    done
 }
 
 # Default place to write exported client bundles. In order of preference:
@@ -1966,7 +2217,28 @@ pki_bundle_client_zip() {
     cp "$crt" "$tmp/$name.crt"
     cp "$key" "$tmp/$name.key"
     cp "$ca"  "$tmp/ca.crt"
-    pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" "$policy_path"
+    # Prefer the node's stored config so local edits and the firewall chosen at
+    # signing time are what actually ships. An explicit policy/firewall override
+    # on the command line still wins and refreshes the stored copy.
+    local node_cfg; node_cfg="$(pki_node_config_path "$name" "$cert_dir")"
+    if [[ -n "$policy_path" ]]; then
+        pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" "$policy_path" || {
+            log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
+        if declare -F pki_node_config_write >/dev/null; then
+            pki_node_config_write "$name" "$cert_dir" "$policy_path" 1 >/dev/null || true
+        fi
+    else
+        if declare -F pki_node_config_write_for_fw >/dev/null; then
+            pki_node_config_write_for_fw "$name" "$cert_dir" 0 >/dev/null || true
+        fi
+        if [[ -s "$node_cfg" ]]; then
+            cp "$node_cfg" "$tmp/config.yml.template"
+            debug_info "bundle config: reusing stored node config $node_cfg"
+        else
+            pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" || {
+                log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
+        fi
+    fi
 
     # Self-contained installers (Linux/macOS + Windows) and a client README.
     local -a files=( "$name.crt" "$name.key" "ca.crt" "config.yml.template" )
@@ -2233,7 +2505,7 @@ pki_group_apply() {
 
     debug_explain "Re-signing ${#PKI_RENAME_FILES[@]} certificate(s) for group action '${PKI_GROUP_ACTION:-resign}'."
     debug_explain "Groups are embedded in the certificate, so it must be re-issued. Name, networks, subnets and expiry are preserved; device private keys are not touched."
-    debug_explain "A throwaway public key is used for each re-sign, so the existing device key keeps working."
+    debug_explain "The certificate's existing public key is reused, so the device's private key keeps working."
 
     # Snapshot the old certificates/keys once, before re-signing any of them.
     if declare -F cert_store_snapshot_before >/dev/null; then
@@ -2259,6 +2531,7 @@ pki_group_apply() {
     fi
     local i crt json name ips subnets newgroups na target_epoch secs bak out_tmp
     local ok=0 failed=0
+    local -a ok_names=()
     for i in "${!PKI_RENAME_FILES[@]}"; do
         crt="${PKI_RENAME_FILES[i]}"
         newgroups="${PKI_RENAME_NEWGROUPS[i]}"
@@ -2293,15 +2566,15 @@ pki_group_apply() {
             fi
             args+=(-duration "${secs}s")
         fi
-        # A throwaway public key lets us re-issue the certificate without
-        # touching the private key that is already on the device.
-        if ! debug_run_quiet "$bin" keygen -out-key "$tmp/sign.key" -out-pub "$tmp/sign.pub"; then
-            log_error "Could not generate a temporary key pair for $(basename "$crt")."
+        # Reuse the public key embedded in the current certificate. Signing a
+        # throwaway key would produce a certificate that no device can use.
+        if ! _pki_pub_from_cert "$bin_path" "$crt" "$tmp/existing.pub"; then
+            log_error "Could not read the existing public key from $(basename "$crt")."
             failed=$((failed+1)); continue
         fi
         out_tmp="$tmp/$name.crt"
         rm -f "$out_tmp"
-        if ! debug_run "${asroot[@]}" "${args[@]}" -in-pub "$tmp/sign.pub" -out-crt "$out_tmp" \
+        if ! debug_run "${asroot[@]}" "${args[@]}" -in-pub "$tmp/existing.pub" -out-crt "$out_tmp" \
             || [[ ! -s "$out_tmp" ]]; then
             log_error "Failed to re-sign $(basename "$crt")."
             failed=$((failed+1)); continue
@@ -2314,6 +2587,7 @@ pki_group_apply() {
         fi
         if debug_run "${asroot[@]}" cp "$out_tmp" "$crt"; then
             ok=$((ok+1))
+            ok_names+=("$name")
             log_success "Re-signed $(basename "$crt"): [${PKI_RENAME_OLDGROUPS[i]}] -> [$newgroups]"
         else
             log_error "Could not replace $crt"
@@ -2322,6 +2596,14 @@ pki_group_apply() {
     done
     ELEVATE_REASON="$prev_reason"
     rm -rf "$tmp"
+    # A group change does not alter the client config, but keep one available for
+    # every certificate (never overwrite a hand-edited file).
+    if declare -F pki_node_config_write_for_fw >/dev/null; then
+        local okn
+        for okn in "${ok_names[@]}"; do
+            pki_node_config_write_for_fw "$okn" "$cert_dir" 0 >/dev/null || true
+        done
+    fi
     if declare -F cert_store_log >/dev/null; then
         cert_store_log "$cert_dir" "group-${PKI_GROUP_ACTION:-resign} changed=$ok failed=$failed snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
     fi
@@ -2672,6 +2954,166 @@ rename_group_cli() {
 ########################### Menus / CLI ############################
 ###################################################################
 
+# pki_resign_all [cert_dir]
+# Re-issue every non-CA certificate with the current CA. Certificates with a
+# local .key get new keys by default; device-only certs keep their public key.
+# Env: PKI_RESIGN_DRY, PKI_RESIGN_YES, PKI_RESIGN_KEEP_KEYS,
+#      PKI_RESIGN_SKIP_DEVICE (all 0/1).
+pki_resign_all() {
+    local cert_dir="${1:-$(resolve_cert_dir)}"
+    CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
+    local bin; bin="$(pki_cert_bin)" || return 1
+    local bin_path; bin_path="$(dirname "$bin")"
+    local ca_crt ca_key ca_json ca_fp
+    ca_crt="$(find_ca_crt "$cert_dir")" || { log_error "CA certificate not found in $cert_dir"; return 1; }
+    ca_key="$(find_ca_key "$cert_dir")" || { log_error "CA key not found in $cert_dir"; return 1; }
+    ca_json="$(nebula_cert_json "$bin_path" "$ca_crt")" || { log_error "Could not read $ca_crt"; return 1; }
+    ca_fp="$(jq -r '.fingerprint // empty' <<<"$ca_json" 2>/dev/null)"
+
+    local dry="${PKI_RESIGN_DRY:-0}" yes="${PKI_RESIGN_YES:-0}"
+    local keep="${PKI_RESIGN_KEEP_KEYS:-0}" skipdev="${PKI_RESIGN_SKIP_DEVICE:-0}"
+    local -a names=() ips=() groups=() subnets=() certs=() modes=() keys=()
+    local -a devices=() skipped_devices=() snapfiles=()
+    local crt json name ip grp sub key mode
+    for crt in "$cert_dir"/*.crt; do
+        [[ -f "$crt" ]] || continue
+        json="$(nebula_cert_json "$bin_path" "$crt" 2>/dev/null)" || {
+            log_warn "Cannot inspect $(basename "$crt") - skipped."; continue; }
+        [[ "$(jq -r '.details.isCa // false' <<<"$json" 2>/dev/null)" == "true" ]] && continue
+        name="$(jq -r '.details.name // empty' <<<"$json" 2>/dev/null)"
+        ip="$(jq -r '(.details.ips // []) | join(",")' <<<"$json" 2>/dev/null)"
+        grp="$(jq -r '(.details.groups // []) | join(",")' <<<"$json" 2>/dev/null)"
+        sub="$(jq -r '(.details.subnets // []) | join(",")' <<<"$json" 2>/dev/null)"
+        if [[ -z "$name" || -z "$ip" ]]; then
+            log_warn "Skipping $(basename "$crt"): no name or network."
+            continue
+        fi
+        key="$cert_dir/$name.key"
+        if [[ -f "$key" ]]; then
+            if [[ "$keep" == 1 ]]; then mode=keepkey; else mode=newkey; fi
+        else
+            if [[ "$skipdev" == 1 ]]; then
+                skipped_devices+=("$name"); continue
+            fi
+            mode=keepkey          # device key cannot be regenerated here
+            devices+=("$name")
+        fi
+        names+=("$name"); ips+=("$ip"); groups+=("$grp"); subnets+=("$sub")
+        certs+=("$crt"); modes+=("$mode"); keys+=("$key")
+    done
+
+    if (( ${#names[@]} == 0 )); then
+        log_warn "No certificates to re-sign in $cert_dir."
+        return 0
+    fi
+
+    echo
+    echo "Re-sign ${#names[@]} certificate(s) with the current CA:"
+    echo "  CA: $ca_crt"
+    [[ -n "$ca_fp" ]] && echo "  CA fingerprint: $ca_fp"
+    printf '  %-32s %-20s %-24s %s\n' "Name" "IP(s)" "Groups" "Key"
+    local i
+    for i in "${!names[@]}"; do
+        printf '  %-32s %-20s %-24s %s\n' "${names[i]}" "${ips[i]}" \
+            "${groups[i]:-(none)}" \
+            "$([[ "${modes[i]}" == newkey ]] && echo 'new key' || echo 'keep key')"
+    done
+    (( ${#devices[@]} )) && echo "  Device certs (no local key; device key kept): ${devices[*]}"
+    (( ${#skipped_devices[@]} )) && echo "  Skipped (no local key): ${skipped_devices[*]}"
+    echo "  Expiry inherits the current CA; old cert/key files are backed up first."
+    echo
+
+    if [[ "$dry" == 1 ]]; then
+        log_info "Dry run: nothing changed."
+        return 0
+    fi
+    if [[ "$yes" != 1 ]]; then
+        if [[ ! -t 0 ]]; then
+            log_error "Refusing to re-sign all certificates without --yes on a non-interactive shell."
+            return 2
+        fi
+        local ans=""
+        read -p "$(show_status 'question') Re-sign these certificates? [y/N]: " ans || return 1
+        [[ "$ans" == "y" || "$ans" == "Y" ]] || { log_info "Canceled."; return 0; }
+    fi
+
+    for i in "${!certs[@]}"; do
+        snapfiles+=("${certs[i]}")
+        [[ -f "${keys[i]}" ]] && snapfiles+=("${keys[i]}")
+    done
+    if declare -F cert_store_snapshot_before >/dev/null; then
+        cert_store_snapshot_before "$cert_dir" "resign-all" "${snapfiles[@]}" || true
+    fi
+
+    local tmp; tmp="$(mktemp -d)" || return 1
+    local ok=0 failed=0 pub out
+    local -a ok_names=()
+    for i in "${!names[@]}"; do
+        if [[ "${modes[i]}" == "newkey" ]]; then
+            if CERT_DIR="$cert_dir" SIGN_NAME="${names[i]}" SIGN_IP="${ips[i]}" \
+                SIGN_GROUPS="${groups[i]}" SIGN_SUBNETS="${subnets[i]}" SIGN_SKIP_SNAPSHOT=1 \
+                pki_sign >/dev/null; then
+                ok=$((ok + 1))
+                ok_names+=("${names[i]}")
+                log_success "Re-signed ${names[i]} with a new key."
+            else
+                failed=$((failed + 1))
+                log_error "Failed to re-sign ${names[i]}."
+            fi
+            continue
+        fi
+
+        pub="$tmp/${names[i]}.pub"
+        out="$tmp/${names[i]}.crt"
+        if ! _pki_pub_from_cert "$bin_path" "${certs[i]}" "$pub"; then
+            failed=$((failed + 1))
+            log_error "Could not read the existing public key from ${names[i]}."
+            continue
+        fi
+        rm -f "$out"
+        local -a args=("$bin" sign -name "${names[i]}" -networks "${ips[i]}" \
+            -ca-crt "$ca_crt" -ca-key "$ca_key" -in-pub "$pub" -out-crt "$out")
+        [[ -n "${groups[i]}" ]]  && args+=(-groups "${groups[i]}")
+        [[ -n "${subnets[i]}" ]] && args+=(-unsafe-networks "${subnets[i]}")
+        if ! debug_run "${args[@]}" >/dev/null || [[ ! -s "$out" ]]; then
+            failed=$((failed + 1))
+            log_error "Failed to re-sign ${names[i]}."
+            continue
+        fi
+        if cp "$out" "${certs[i]}"; then
+            chmod 644 "${certs[i]}" 2>/dev/null || true
+            ok=$((ok + 1))
+            ok_names+=("${names[i]}")
+            log_success "Re-signed ${names[i]} (kept the existing key)."
+        else
+            failed=$((failed + 1))
+            log_error "Could not replace ${certs[i]}."
+        fi
+    done
+    rm -rf "$tmp"
+    # Re-signing does not change network settings, but make sure every local
+    # certificate still has a config in <cert-dir>/configs (existing ones kept).
+    if declare -F pki_node_config_write_for_fw >/dev/null; then
+        local okn
+        for okn in "${ok_names[@]}"; do
+            [[ -f "$cert_dir/$okn.key" ]] || continue
+            pki_node_config_write_for_fw "$okn" "$cert_dir" 0 >/dev/null || true
+        done
+    fi
+    if declare -F cert_store_log >/dev/null; then
+        cert_store_log "$cert_dir" "resign-all changed=$ok failed=$failed snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
+    fi
+    log_info "Re-signed ${ok} certificate(s); ${failed} failed."
+    (( failed == 0 ))
+}
+
+pki_resign_all_tui() {
+    local cert_dir; cert_dir="$(resolve_cert_dir)"
+    ensure_cert_dir >/dev/null || return 1
+    PKI_RESIGN_DRY=0 PKI_RESIGN_YES=0 PKI_RESIGN_KEEP_KEYS=0 PKI_RESIGN_SKIP_DEVICE=0 \
+        pki_resign_all "$cert_dir"
+}
+
 manage_nebula_certs() {
     ensure_cert_dir >/dev/null || return 1
     dynamic_menu_title=("$MENU_PATH" "Certificate Management")
@@ -2679,11 +3121,13 @@ manage_nebula_certs() {
         "$(get_icon 'list')List Certificates"
         "$(get_icon 'create')Generate CA Certificate"
         "$(get_icon 'create')Generate Client Certificate"
+        "$(get_icon 'refresh')Re-sign All Certificates"
         "$(get_icon 'edit')Rename Group in Certificates"
         "$(get_icon 'edit')Edit Groups (Batch)…"
         "$(get_icon 'inspect')View Certificate and Key Details"
         "$(get_icon 'hour-glass')Certificate Expiry"
         "$(get_icon 'upload')Bundle / Export Client Certificate"
+        "$(get_icon 'edit')Node Client Configs"
         "$(get_icon 'revoke')Revoke Certificate"
         "$(get_icon 'keys')Switch Certificate Workspace"
         "$(get_icon 'backup')Store Backup / Git"
@@ -2693,11 +3137,13 @@ manage_nebula_certs() {
         "list_certs"
         "generate_nebula_ca"
         "generate_nebula_cert"
+        "pki_resign_all_tui"
         "pki_rename_group_tui"
         "pki_group_edit_tui"
         "view_cert_details"
         "list_certs_expiry"
         "pki_bundle_client_menu"
+        "pki_node_config_menu_tui"
         "revoke_cert"
         "select_cert_workspace"
         "cert_store_menu"
@@ -2773,6 +3219,106 @@ pki_bundle_client_menu() {
     local rc=$?
     [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
     return $rc
+}
+
+# Headless: nebula-manager cert config <list|show|path|edit|generate> ...
+pki_node_config_cli() {
+    local sub="${1:-list}"; shift || true
+    local cert_dir="" force=0 all=0
+    local -a names=()
+    local -a args=()
+    case "$sub" in -h|--help) args+=("--help") ;; esac
+    while (( $# )); do
+        case "$1" in
+            --cert-dir)   shift; cert_dir="${1:-}" ;;
+            --cert-dir=*) cert_dir="${1#*=}" ;;
+            --force|-f)   force=1 ;;
+            --all|-a)     all=1 ;;
+            -h|--help)    args+=("--help") ;;
+            -*) log_error "Unknown option for 'cert config': $1"; return 2 ;;
+            *) names+=("$1") ;;
+        esac
+        shift
+    done
+    cert_dir="${cert_dir:-$(resolve_cert_dir)}"
+
+    if [[ " ${args[*]:-} " == *" --help "* ]]; then
+        cat >&2 <<'EOF'
+Usage: nebula-manager cert config <command> [options]
+
+Ready-to-deploy client configs stored as <cert-dir>/configs/<name>.yml.
+
+  list                         List local certificates and their config file
+  show <name|match>            Print a certificate's client config
+  path <name|match>            Print the config path
+  edit <name|match>            Open the config in $EDITOR (generates if missing)
+  generate <name|match>...     Create missing configs (--force to regenerate)
+  generate --all [--force]     All local certificates (mobile certs skipped)
+
+Options:
+  --cert-dir DIR   Certificate workspace
+  --force, -f      Regenerate even when a config already exists
+  --all, -a        Apply generate/refresh to every local certificate
+EOF
+        return 0
+    fi
+
+    local name
+    case "$sub" in
+        list|ls)
+            pki_node_config_list "$cert_dir"
+            ;;
+        path|show|edit)
+            name="${names[0]:-}"
+            [[ -n "$name" ]] || { log_error "cert config $sub: certificate name required"; return 2; }
+            pki_resolve_bundle_name "$name" "$cert_dir"
+            case $? in
+                0) name="$PKI_BUNDLE_RESOLVED" ;;
+                2) log_error "Ambiguous certificate name '$name'. Matches: ${PKI_BUNDLE_MATCHES[*]}"; return 2 ;;
+                *) log_error "No certificate with a local key matching '$name' in $cert_dir."; return 1 ;;
+            esac
+            local path; path="$(pki_node_config_path "$name" "$cert_dir")"
+            case "$sub" in
+                path) printf '%s\n' "$path" ;;
+                show)
+                    if [[ ! -s "$path" ]]; then
+                        log_error "No node config yet: $path"
+                        log_info "Generate it with: nebula-manager cert config generate '$name' --cert-dir '$cert_dir'"
+                        return 1
+                    fi
+                    cat "$path"
+                    ;;
+                edit)
+                    [[ -s "$path" ]] || pki_node_config_write_for_fw "$name" "$cert_dir" 0 || return 1
+                    "${EDITOR:-${VISUAL:-vi}}" "$path"
+                    ;;
+            esac
+            ;;
+        generate|refresh|regen|ensure)
+            if (( all )); then
+                pki_node_config_refresh_all "$cert_dir" "$force"
+                return $?
+            fi
+            (( ${#names[@]} )) || { log_error "cert config $sub: give a certificate name or --all"; return 2; }
+            local failed=0 ok=0
+            for name in "${names[@]}"; do
+                pki_resolve_bundle_name "$name" "$cert_dir"
+                case $? in
+                    0) name="$PKI_BUNDLE_RESOLVED" ;;
+                    2) log_error "Ambiguous certificate name '$name'. Matches: ${PKI_BUNDLE_MATCHES[*]}"; failed=$((failed+1)); continue ;;
+                    *) log_error "No certificate with a local key matching '$name' in $cert_dir."; failed=$((failed+1)); continue ;;
+                esac
+                if pki_node_config_write_for_fw "$name" "$cert_dir" "$force"; then
+                    ok=$((ok+1))
+                else
+                    failed=$((failed+1))
+                fi
+            done
+            log_info "Node configs: $ok written, $failed failed."
+            (( failed == 0 ))
+            ;;
+        *) log_error "Unknown 'cert config' subcommand: $sub (list|show|path|edit|generate)"; return 2 ;;
+    esac
 }
 
 # --- Headless CLI --------------------------------------------------
@@ -2900,6 +3446,40 @@ pki_cli() {
             local bundle_rc=$?
             [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"
             return $bundle_rc
+            ;;
+        config|node-config|node_config|configs)
+            pki_node_config_cli "$@"
+            ;;
+        resign-all|renew-all|resignall)
+            local rcert="" rdry=0 ryes=0 rkeep=0 rskip=0
+            while (( $# )); do
+                case "$1" in
+                    --cert-dir) shift; rcert="${1:-}" ;;
+                    --cert-dir=*) rcert="${1#*=}" ;;
+                    --dry-run|-n) rdry=1 ;;
+                    --yes|-y) ryes=1 ;;
+                    --keep-keys) rkeep=1 ;;
+                    --skip-device|--skip-mobile) rskip=1 ;;
+                    -h|--help)
+                        cat >&2 <<'EOF'
+Usage: nebula-manager cert resign-all [options]
+
+Re-issue every non-CA certificate with the current CA.
+
+  --cert-dir DIR   Certificate workspace
+  --keep-keys      Keep existing private keys (default: new keys for local certs)
+  --skip-device    Skip certs without a local private key (mobile/device)
+  --dry-run, -n    Show the preview; change nothing
+  --yes, -y        Do not ask (required when stdin is not a TTY)
+EOF
+                        return 0 ;;
+                    *) log_error "Unknown option for 'cert resign-all': $1"; return 2 ;;
+                esac
+                shift
+            done
+            PKI_RESIGN_DRY="$rdry" PKI_RESIGN_YES="$ryes" \
+                PKI_RESIGN_KEEP_KEYS="$rkeep" PKI_RESIGN_SKIP_DEVICE="$rskip" \
+                pki_resign_all "$rcert"
             ;;
         workspace)
             select_cert_workspace ;;

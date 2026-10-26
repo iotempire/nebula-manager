@@ -871,11 +871,13 @@ Certificates|ca cert certificate sign revoke keys pki nodes machines groups work
 Certificates ▸ List Certificates|list show certs certificates nodes machines|list_certs
 Certificates ▸ Generate CA Certificate|ca create authority pki|generate_nebula_ca
 Certificates ▸ Generate Client Certificate|sign create node machine client certificate|generate_nebula_cert
+Certificates ▸ Re-sign All Certificates|renew resign all certificates new ca rotation keys|pki_resign_all_tui
 Certificates ▸ Rename Group|rename group cert certificate|pki_rename_group_tui
 Certificates ▸ Edit Groups (Batch)|groups batch add remove move set rename certificates|pki_group_edit_tui
 Certificates ▸ View Certificate Details|view details inspect show cert certificate|view_cert_details
 Certificates ▸ Certificate Expiry|expiry expiration renew cert certificate|list_certs_expiry
 Certificates ▸ Bundle / Export Client|bundle export zip client certificate|pki_bundle_client_menu
+Certificates ▸ Node Client Configs|node config config.yml client generate edit firewall per-certificate|pki_node_config_menu_tui
 Certificates ▸ Revoke Certificate|revoke blocklist cert certificate|revoke_cert
 Certificates ▸ Switch Workspace|workspace cert dir keys store|select_cert_workspace
 Certificates ▸ Store Backup / Git|backup git history store cert|cert_store_menu

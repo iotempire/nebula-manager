@@ -160,6 +160,7 @@ NEBULA_LOCAL_CONFIG="$LOCAL" NEBULA_DIR="$SANDBOX/no-such-dir" \
     run_writer "$SANDBOX/lighthouse.yml" "vps.example" "$KEYS"
 cfg="$(cat "$SANDBOX/lighthouse.yml")"
 assert_contains "lighthouse cert -> am_lighthouse true" "$cfg" 'am_lighthouse: true'
-assert_contains "lighthouse cert gets a fixed listen port" "$cfg" 'port: 4242'
+# The advertised static_host_map port is authoritative (not a hard-coded 4242).
+assert_contains "lighthouse cert listens on its advertised port" "$cfg" 'port: 4545'
 
 harness_summary

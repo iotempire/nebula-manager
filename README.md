@@ -328,9 +328,10 @@ Selector grammar (repeat `--select` to union; `--exclude` subtracts):
 What is preserved: **name, IP networks, subnets and expiry**. Duplicate groups
 are removed and the original order is kept. Each original certificate is saved
 next to itself as `<name>.crt.bak` (a pre-existing backup is never overwritten),
-and the private key on the device is **not** touched — the re-issued certificate
-is signed with a throwaway public key, so devices keep working with their
-existing key.
+and the private key on the device is **not** touched: the helper reads the
+public key out of the existing certificate and passes it back to
+`nebula-cert sign -in-pub`, so the re-issued certificate matches the key the
+device already has.
 
 Without `--yes` the CLI prints the preview and asks first; on a non-interactive
 shell it refuses instead of re-signing silently. Batch actions require an
@@ -340,6 +341,96 @@ filter can never silently rewrite everything.
 To give a **single** certificate more groups you can also re-sign it directly
 (`nebula-manager sign --name … --ip … --groups a,b,c`), or use the batch editor
 with `--select cert:<name>`.
+
+### Re-signing everything after a CA rotation
+
+When the CA was recreated (or you simply want a fresh validity window), every
+certificate in the workspace still carries the **old** CA's signature. The
+one-shot re-sign replaces them in a single previewed action:
+
+**Certificates ▸ Re-sign All Certificates** — or headless:
+
+```bash
+# 1. See exactly what would happen (safe; nothing is written):
+./nebula-manager cert resign-all --cert-dir ~/keys/nebula --dry-run
+
+# 2. Re-issue every certificate with the current CA:
+./nebula-manager cert resign-all --cert-dir ~/keys/nebula --yes
+```
+
+What happens:
+
+- Only **non-CA** certificates are touched; `ca.crt`/`ca.key` are never rewritten.
+- **Name, overlay networks, routed subnets, groups and the existing expiry** are
+  carried over, so the fleet keeps the same addressing and policy.
+- Local certificates (`<name>.key` exists) get **new private keys** by default,
+  because rotation is the safer choice after a CA change. Keep the old keys with
+  `--keep-keys`.
+- **Device certificates** (mobile/`--in-pub`, no local `.key`) cannot get a new
+  key here. Their public key is extracted from the certificate and the cert is
+  re-signed for it, so the phone keeps working. Use `--skip-device` to leave
+  those certificates untouched instead.
+- Before anything is replaced, the store is snapshotted (git commit when tracked,
+  otherwise `<cert-dir>/backups/<timestamp>-resign-all/` with `ACTION.txt`) and
+  the run is recorded in `<cert-dir>/nebula-manager.log`.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` / `-n` | print the plan (name, IPs, groups, new/keep key); write nothing |
+| `--yes` / `-y` | no confirmation prompt (required when stdin is not a TTY) |
+| `--keep-keys` | reuse existing `<name>.key` files instead of rotating them |
+| `--skip-device` | skip certificates that have no local private key |
+
+After re-signing, redeploy the updated certificates (and, when keys rotated, the
+new `.key`) to the nodes — e.g. with a client bundle, the self-contained
+installer, or the Fleet menu. Nodes whose key changed must receive the new key
+or they will fall out of the mesh.
+
+### Per-node client configs (`configs/<name>.yml`)
+
+Every local certificate now keeps its ready-to-deploy client config **in the
+workspace**, next to the PKI:
+
+```text
+~/keys/nebula/
+├── ca.crt
+├── node1.mesh.crt
+├── node1.mesh.key
+└── configs/
+    └── node1.mesh.yml     # pki paths, static_host_map, lighthouse, punchy, firewall, tun
+```
+
+- The file is written **when the certificate is signed** (the firewall you pick
+  for the node is embedded) and kept in sync by re-signing/resign-all when it is
+  missing. Existing files are **never overwritten silently**, so hand edits
+  survive group changes and key rotation; a forced regeneration first snapshots
+  the old file into the store history.
+- **Certificates ▸ Node Client Configs** lets you list, show, edit, regenerate
+  one node, or regenerate every config. Editing needs no root: it is a normal
+  user-owned file.
+- **Certificates ▸ Bundle / Export Client** ships the stored config as
+  `config.yml.template`. An explicit `--policy`/`--firewall` choice still wins
+  and refreshes the stored copy.
+- Mobile/`--in-pub` certificates have no client config (the app manages it).
+- The config contains no private key; only the bundle adds the `.key`.
+- A **lighthouse's** listen port is taken from its `static_host_map` endpoint
+  (e.g. `vps.example:4545` → `listen.port: 4545`), so a non-default port is not
+  silently replaced by 4242.
+
+Headless equivalents (all support `--cert-dir DIR`):
+
+```bash
+./nebula-manager cert config list
+./nebula-manager cert config path node1     # unique substring is fine
+./nebula-manager cert config show node1
+./nebula-manager cert config edit node1     # opens $EDITOR, generates if missing
+./nebula-manager cert config generate node1
+./nebula-manager cert config generate --all --force   # refresh every node
+```
+
+When a deployment needs a different firewall than the stored one, edit the
+stored config (or regenerate with a policy pack) rather than patching the
+bundle: the bundle is intentionally predictable.
 
 ### Exporting a client bundle
 
@@ -594,7 +685,7 @@ headless subcommands for scripting — see *Expert / scriptable* below.
 |---|---|
 | **Manager Setup** | shows the **detected state** (manager config, Nebula service, cert workspace), then: import/update from this host, **import a client bundle (.zip/.tar.gz)**, create, browse, edit, delete `nebula-manager.conf`, manage instances, pick the certificate workspace |
 | **Instances** | list / add / enable-disable / remove `[server.*]` entries, and start/stop the selected instance's service |
-| **Certificates** | list, create CA, sign, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), revoke, switch workspace |
+| **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`configs/<name>.yml`: generate/edit/refresh), revoke, switch workspace, store backup/git |
 | **Fleet** | **croc mass deployment** (one code per student/node), **SSH push** of a config/firewall change, and SSH reachability probing |
 | **Instance Settings** | validate / edit Nebula `config.yml` (service-owned files are edited on a working copy and saved once with a timestamped backup), edit firewall rules with a **group picker + rule templates + explain**, **policy packs** (embed in bundles / apply / export), **name resolution (Nebula DNS)** |
 | **Connectivity** | ping every cert IP; optional `iperf3` test |
@@ -677,6 +768,10 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 #   ^ mobile: sign the device-generated public key; no .key written, QR for the app
 ./nebula-manager cert list
 ./nebula-manager cert expiry 30         # certs expiring within 30 days
+./nebula-manager cert resign-all         # re-issue everything with the current CA
+./nebula-manager cert resign-all --dry-run   # preview only; --keep-keys/--skip-device available
+./nebula-manager cert config list        # per-node configs in <cert-dir>/configs
+./nebula-manager cert config generate --all   # create/refresh every node config
 ./nebula-manager cert bundle             # list certificates that can be exported
 ./nebula-manager cert bundle host1       # exact or unique substring; writes to cwd
 ./nebula-manager cert bundle host1 --out ~/Downloads
@@ -1262,6 +1357,9 @@ What it covers:
 | `tests/test_edit.sh` | privileged-safe config editing: working copy for read-only/unreadable configs, elevated write-back, timestamped backup, and no-op when nothing changed |
 | `tests/test_import_bundle.sh` | client bundle import: tar.gz extraction, validation, path rebasing, manager.conf creation, overwrite/backup, dry-run, TUI wrapper, CLI, post-import `--start` |
 | `tests/test_dns.sh` | Nebula DNS: lighthouse `serve_dns` + UDP/53 firewall, client `resolvectl` DNS/domain setup, status output, static_host_map fallback |
+| `tests/test_duration.sh` | human certificate durations (`720`, `720h`, `365d`, `52w`, `10y`) normalized to Go hours; invalid/zero/fractional input rejected; CA defaults offered from the current CA or the newest backup |
+| `tests/test_resign_all.sh` | one-shot CA rotation: dry-run/no-op, non-TTY refusal, old-CA certs re-issued by the new CA, `--keep-keys`, default key rotation, device-key preservation, `--skip-device`, snapshot + action log, no sudo, CLI `cert resign-all` |
+| `tests/test_node_config.sh` | per-node `configs/<name>.yml`: signing writes it, detected network settings/firewall embedded, hand edits survive, `--force` refreshes, bundle reuses it, explicit policy overrides, mobile skipped, CLI list/show/path/generate, no sudo |
 | `tests/test_rename_group.sh` | group migration: preview/scan, dedup + order, re-sign preserves name/IP/expiry, unaffected certs/keys byte-identical, `*.crt.bak`, no sudo, CLI `--yes`/non-tty refusal |
 | `tests/test_group_batch.sh` | selector grammar (`group`/`without`/`name` glob/`ip` CIDR/`cert`/union/exclude) + batch add/remove/move/set/prune, idempotency, `--dry-run`, non-tty refusal, `group list`, plain checklist parsing |
 | `tests/test_firewall_groups.sh` | firewall group discovery/counts, picker (defaults/manual/unknown groups), rule templates, editor picker wiring, explain (defaults/matches/typo warning), diff + save prompt, CLI |
@@ -1323,17 +1421,19 @@ Create/sign/revoke certificates; manage the CA, groups and the certificate works
     1. 📄 List Certificates
     2. 🆕 Generate CA Certificate
     3. 🆕 Generate Client Certificate
-    4. 📝 Rename Group in Certificates
-    5. 📝 Edit Groups (Batch)…
-    6. 🔍 View Certificate and Key Details
-    7. ⏳ Certificate Expiry
-    8. 📤 Bundle / Export Client Certificate
-    9. ⛔ Revoke Certificate
-    10. 🗝️ Switch Certificate Workspace
-    11. 💾 Store Backup / Git
-    12. ❌ Remove Certificate
-    13. ↩️ Go Back
-    [?] Choose an option [1-13, Enter=Back, /=search, ?=help]:
+    4. 🔄 Re-sign All Certificates
+    5. 📝 Rename Group in Certificates
+    6. 📝 Edit Groups (Batch)…
+    7. 🔍 View Certificate and Key Details
+    8. ⏳ Certificate Expiry
+    9. 📤 Bundle / Export Client Certificate
+    10. 📝 Node Client Configs
+    11. ⛔ Revoke Certificate
+    12. 🗝️ Switch Certificate Workspace
+    13. 💾 Store Backup / Git
+    14. ❌ Remove Certificate
+    15. ↩️ Go Back
+    [?] Choose an option [1-15, Enter=Back, /=search, ?=help]:
 ```
 
 **Certificate list** — `nebula-manager cert list` (plain CSV, never truncated)

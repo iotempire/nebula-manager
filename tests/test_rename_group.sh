@@ -58,6 +58,7 @@ beta_key_before="$(sha256sum "$keys/beta.mesh.key" | cut -d' ' -f1)"
 ca_key_before="$(sha256sum "$keys/ca.key" | cut -d' ' -f1)"
 ca_crt_before="$(sha256sum "$keys/ca.crt" | cut -d' ' -f1)"
 alpha_na_before="$(date -d "$(nebula_cert_json "$(dirname "$(pki_cert_bin)")" "$keys/alpha.mesh.crt" | jq -r '.details.notAfter')" +%s)"
+alpha_pub_before="$(nebula_cert_json "$(dirname "$(pki_cert_bin)")" "$keys/alpha.mesh.crt" | jq -r '.publicKey')"
 
 if pki_group_scan laptops ulno "$keys"; then _ok "scan finds certificates with 'laptops'"
 else _bad "scan finds certificates with 'laptops'"; fi
@@ -87,6 +88,9 @@ assert_eq "eta keeps its routed subnet" \
     "$(nebula_cert_json "$(dirname "$(pki_cert_bin)")" "$keys/eta.mesh.crt" | jq -r '.details.subnets | join(",")')" \
     "192.168.50.0/24"
 assert_eq "gamma's groups untouched"     "$(groups_of "$keys/gamma.mesh.crt")" "desktops"
+assert_eq "re-sign preserves the device public key" \
+    "$(nebula_cert_json "$(dirname "$(pki_cert_bin)")" "$keys/alpha.mesh.crt" | jq -r '.publicKey')" \
+    "$alpha_pub_before"
 
 assert_file "alpha backed up" "$keys/alpha.mesh.crt.bak"
 assert_file "beta backed up"  "$keys/beta.mesh.crt.bak"

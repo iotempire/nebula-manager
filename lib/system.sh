@@ -2370,6 +2370,7 @@ manage_firewall() {
     local source="${NEBULA_DIR:-/etc/nebula}/config.yml"
     [[ -f "$source" ]] || { log_error "Config file not found: $source"; return 1; }
     require_yq_v4 || return 1
+    log_info "This edits the local service config. Per-node client configs live under Certificates > Node Client Configs."
     config_edit_begin "$source" || return 1
     local config_file="$CONFIG_EDIT_WORK"
     # Snapshot the pre-edit state: an in-place writable config is modified as we

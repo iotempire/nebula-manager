@@ -115,7 +115,7 @@ mkdir -p "$SANDBOX/pki"
 : > "$SANDBOX/pki/ca.key"
 out="$(CERT_DIR="$SANDBOX/pki" SIGN_NAME="node1" SIGN_IP="10.9.9.2/24" \
     DEBUG=learn pki_sign 2>"$ERR")"
-assert_contains "learn: sign command shown" "$(cat "$ERR")" "nebula-cert sign -name node1 -ip 10.9.9.2/24"
+assert_contains "learn: sign command shown" "$(cat "$ERR")" "nebula-cert sign -name node1 -networks 10.9.9.2/24"
 assert_contains "learn: sign success still logged" "$out" "Certificate signed"
 
 # The exact command shown is also appended to the certificate-store log, and a

@@ -34,7 +34,7 @@ Start the tool and everything is selectable from the text-graphical menus:
 |---|---|
 | **Manager Setup** | shows the detected state, then Import/Update / **Import client bundle** / Create / Browse / Edit / Delete config, Manage instances, Certificate Workspace |
 | **Instances** | List / Add / Enable-Disable / Remove `[server.*]`, start/stop the service |
-| **Certificates** | List / Create CA / Sign / View / Expiry / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
+| **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / View / Expiry / **per-node client configs** (`configs/<name>.yml`) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
 | **Fleet** | **croc mass deployment** (one code per student) / **SSH push** of a config or firewall / SSH reachability probe |
 | **Instance Settings** | Validate / Edit Nebula `config.yml` / Firewall / Name resolution |
 | **Connectivity** | ping all cert IPs (+ optional `iperf3`) |
@@ -163,7 +163,7 @@ the functional keys are `dir`, `service`, `enabled`.
 ### Phase 2 — Add home machines theprof3 and theprof4
 
 **TUI:** *Instances ▸ Add Instance*, *Certificates ▸ Generate Client Certificate*,
-*Certificates ▸ Bundle Client Zip*.
+*Certificates ▸ Node Client Configs*, *Certificates ▸ Bundle Client Zip*.
 
 Sign certs unprivileged in the existing workspace. In the TUI the name and IP
 are **pre-filled from the existing certs** (domain suffix `.theprof.mesh`, next
@@ -177,9 +177,9 @@ free address `10.100.0.4/24`) — just press Enter to accept:
 
 After signing, the tool asks which **firewall the new node's client template**
 should carry (a suggested policy pack, this host's firewall, permissive, Nebula
-defaults, or decide later). That choice is remembered per certificate and is
-pre-selected when the bundle is exported, so theprof3/theprof4 get the home
-rules without re-selecting them.
+defaults, or decide later). It then writes the complete client config to the
+workspace as `configs/theprof3.theprof.mesh.yml` (cert/key next to it), embeds
+that firewall, and remembers the choice per certificate.
 
 ```bash
 $ nebula-manager sign --cert-dir ~/keys/nebula \
@@ -192,12 +192,14 @@ $ nebula-manager cert bundle theprof4.theprof.mesh --out ./bundles
 ```
 
 Each bundle (`./bundles/theprof3.theprof.mesh-nebula-bundle.zip`) contains the cert, key,
-`ca.crt` and a `config.yml.template`. The template is populated from the running
+`ca.crt` and a `config.yml.template`. The template is the **stored per-node
+config** (`configs/theprof3.theprof.mesh.yml`), populated from the running
 Nebula config (or from the `[server.*]` entries + certificates): real
 `static_host_map`/`lighthouse.hosts`, `punchy`, `listen`, `tun` and the firewall
 policy. Anything that cannot be determined is flagged in the file and as a
-warning instead of being silently left as a placeholder. He also edits the
-**firewall** so home machines can talk to each other without restrictions:
+warning instead of being silently left as a placeholder. He edits the stored
+config once (*Certificates ▸ Node Client Configs ▸ Edit*) so home machines can
+talk to each other without restrictions, and every future bundle reuses it:
 
 ```yaml
 firewall:
