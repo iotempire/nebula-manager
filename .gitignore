@@ -1,0 +1,7 @@
+# Fleet croc output: generated bundles (they contain private keys), logs, and
+# per-run directories. Never commit these.
+fleet-bundles-*/
+*-nebula-bundle.zip
+*-nebula-bundle.tar.gz
+.croc-*.log
+.bundle-*.log

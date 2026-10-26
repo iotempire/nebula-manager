@@ -920,9 +920,11 @@ are written next to the bundles as `.croc-<node>.log`.
   host|permissive|default|pack:NAME|skip`. Without either, each node's saved
   choice from certificate creation (or the last choice) is used, else the
   detected host firewall.
-- `--out DIR` (default `./fleet-bundles-<timestamp>`), `--code-prefix TEXT`,
-  `--timeout SECONDS` (default: wait forever), `--dry-run` (create bundles and
-  print codes/commands, start no senders).
+- `--out DIR` (default `./fleet-bundles-<timestamp>`, which is git-ignored
+  along with its `.croc-*.log` / `.bundle-*.log` files because the archives
+  contain private keys), `--code-prefix TEXT`, `--timeout SECONDS` (default:
+  wait forever), `--dry-run` (create bundles and print codes/commands, start no
+  senders).
 - Each student runs the code, extracts the archive and runs the installer:
   `croc CODE`, then `unzip '*.zip'` / `Expand-Archive`, then
   `sudo bash install.sh` (or `install.ps1`). The bundle's `README.txt` contains
