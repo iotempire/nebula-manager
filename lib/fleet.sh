@@ -227,7 +227,9 @@ fleet_croc_cli() {
     local start=$SECONDS
     if (( ! dry )); then
         for i in "${!names[@]}"; do
-            croc --yes send --code "${codes[i]}" "${bundles[i]}" \
+            # croc 11.x rejects `send --code CODE` (it prints a usage notice and
+            # exits 0); a custom code phrase must be passed via CROC_SECRET.
+            CROC_SECRET="${codes[i]}" croc --yes send "${bundles[i]}" \
                 >"$out_dir/.croc-${names[i]}.log" 2>&1 &
             FLEET_PIDS+=($!)
             live+=("${names[i]}|${codes[i]}|${bundles[i]}|${FLEET_PIDS[${#FLEET_PIDS[@]}-1]}")
@@ -253,15 +255,24 @@ fleet_croc_cli() {
 
     printf '\nWaiting for receivers (Ctrl-C to stop)...\n'
     local -a remaining=("${live[@]}")
-    local entry rc n c p
+    local entry rc n c p setup_failed
     while (( ${#remaining[@]} > 0 )); do
         local -a next=()
         for entry in "${remaining[@]}"; do
             IFS='|' read -r n c _b p <<< "$entry"
             if _fleet_pid_finished "$p"; then
+                setup_failed=0
                 if wait "$p"; then rc=0; else rc=$?; fi
+                # Guard against croc printing a usage notice and exiting 0, which
+                # would otherwise be reported as a successful delivery.
+                if (( rc == 0 )) && grep -qi "need to set the environmental variable CROC_SECRET" \
+                        "$out_dir/.croc-$n.log" 2>/dev/null; then
+                    rc=1; setup_failed=1
+                fi
                 if (( rc == 0 )); then
                     log_success "Delivered $n (code $c)"
+                elif (( setup_failed )); then
+                    log_error "croc rejected the custom code for $n - see $out_dir/.croc-$n.log (update croc?)"
                 else
                     log_error "Transfer failed for $n (code $c) - see $out_dir/.croc-$n.log"
                 fi

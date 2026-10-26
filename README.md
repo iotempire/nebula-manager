@@ -926,7 +926,11 @@ are written next to the bundles as `.croc-<node>.log`.
 - Each student runs the code, extracts the archive and runs the installer:
   `croc CODE`, then `unzip '*.zip'` / `Expand-Archive`, then
   `sudo bash install.sh` (or `install.ps1`). The bundle's `README.txt` contains
-the exact lines.
+  the exact lines.
+- Senders use croc's secure mode (`CROC_SECRET=<code> croc send …`). Croc 11.x
+  rejects the older `send --code` form by printing a usage notice and exiting
+  `0`; the tool recognises that and reports it as an error instead of
+  `Delivered`.
 
 ### SSH push to one node
 
@@ -1236,7 +1240,7 @@ What it covers:
 | `tests/test_bundle.sh` | client export: candidate listing, substring/ambiguous matching, default output dir, TUI picker, mode 0600 |
 | `tests/test_bundle_installer.sh` | self-contained bundles: install.sh/install.ps1/README shipped, user-owned install without sudo, config diff + refusal/`--yes`, backups, share one-liners |
 | `tests/test_installer_ps1.sh` | PowerShell installer under `pwsh` (Linux CI): parse, portable install, config diff/refusal/`-Yes`, `-CertsOnly`, plus simulated-Windows ACL and service install/start/restart with mocks |
-| `tests/test_fleet_croc.sh` | fleet croc: selection → bundles, one `croc send --code …` per node, code table, dry-run, mobile-cert skip, policy embedding, unique codes |
+| `tests/test_fleet_croc.sh` | fleet croc: selection → bundles, one `CROC_SECRET=<code> croc send …` per node (never the rejected `--code` form), code table, dry-run, mobile-cert skip, policy embedding, unique codes |
 | `tests/test_fleet_ssh.sh` | fleet SSH: name expansion, port probing, user discovery, passwordless-sudo/root handling, remote fetch → local merge → diff → upload/backup/test, dry-run, unreachable guidance |
 | `tests/test_client_config.sh` | generated client template: real static_host_map/lighthouse/punchy/listen/tun/firewall from the local config, `[server.*]` fallback, and missing-value warnings |
 | `tests/test_edit.sh` | privileged-safe config editing: working copy for read-only/unreadable configs, elevated write-back, timestamped backup, and no-op when nothing changed |
