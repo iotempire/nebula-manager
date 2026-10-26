@@ -1447,6 +1447,117 @@ pki_default_bundle_dir() {
     printf '%s\n' "$d"
 }
 
+# The last interactive bundle destination, remembered like the workspace.
+nebula_bundle_dir_state_file() {
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/nebula-manager/bundle-dir"
+}
+
+save_bundle_dir_selection() {
+    local dir="$1" f
+    [[ -n "$dir" ]] || return 0
+    f="$(nebula_bundle_dir_state_file)"
+    mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+    printf '%s\n' "$dir" > "$f" 2>/dev/null || true
+}
+
+load_bundle_dir_selection() {
+    local f
+    f="$(nebula_bundle_dir_state_file)"
+    [[ -f "$f" ]] && head -n1 "$f"
+}
+
+# pki_choose_bundle_dir [cert_dir]
+# Interactive destination chooser for an exported client bundle. Describes and
+# offers, in order: the configured $NEBULA_BUNDLE_DIR, the last chosen folder,
+# <cert-dir>/export, ~/Downloads/nebula-bundles, ~/tmp/nebula-bundles (only when
+# ~/tmp exists), then browse or type a path. Enter picks the first entry. Prints
+# the selected directory; returns 1 on cancel.
+pki_choose_bundle_dir() {
+    local cert_dir="${1:-$(resolve_cert_dir)}"
+    local configured="" last export_dir downloads_dir tmp_dir
+    if [[ -n "${NEBULA_BUNDLE_DIR:-}" ]]; then
+        configured="${NEBULA_BUNDLE_DIR/#\~/$HOME}"
+        [[ "$configured" == /* ]] || configured="$PWD/$configured"
+    fi
+    last="$(load_bundle_dir_selection)"
+    export_dir="${cert_dir%/}/export"
+    downloads_dir="${HOME:-}/Downloads/nebula-bundles"
+    tmp_dir=""
+    [[ -n "${HOME:-}" && -d "$HOME/tmp" ]] && tmp_dir="$HOME/tmp/nebula-bundles"
+
+    local -a tags=() descs=() dirs=() pairs=()
+    local d tag desc p dup i backend
+    backend="$(ui_backend)"
+    for d in "$configured" "$last" "$export_dir" "$downloads_dir" "$tmp_dir"; do
+        [[ -n "$d" ]] || continue
+        dup=0
+        if (( ${#dirs[@]} )); then
+            for p in "${dirs[@]}"; do [[ "$p" == "$d" ]] && { dup=1; break; }; done
+        fi
+        (( dup )) && continue
+        if [[ "$d" == "$configured" ]]; then
+            tag=configured; desc="Configured (NEBULA_BUNDLE_DIR): $d"
+        elif [[ "$d" == "$last" ]]; then
+            tag=last; desc="Last used: $d"
+        elif [[ "$d" == "$export_dir" ]]; then
+            tag=export; desc="Certificate export folder: $d"
+        elif [[ "$d" == "$downloads_dir" ]]; then
+            tag=downloads; desc="Downloads: $d"
+        else
+            tag=tmp; desc="Temporary (~/tmp): $d"
+        fi
+        tags+=("$tag"); descs+=("$desc"); dirs+=("$d")
+    done
+    [[ "$backend" != "plain" ]] && { tags+=( browse ); descs+=( "Browse for a folder..." ); }
+    tags+=( custom ); descs+=( "Select your own (type a path)..." )
+    for i in "${!tags[@]}"; do pairs+=( "${tags[i]}" "${descs[i]}" ); done
+
+    local choice="" answer out=""
+    if [[ "$backend" != "plain" ]]; then
+        choice="$(ui_menu "Bundle / Export Client" "Where should the bundle be written?" "${pairs[@]}")" || return 1
+    else
+        echo -e "${BOLD}Bundle / Export Client${RESET}" >&2
+        echo "Where should the bundle be written?" >&2
+        for i in "${!tags[@]}"; do
+            printf "  ${BOLD}${YELLOW}%d.${RESET} %s\n" "$((i + 1))" "${descs[i]}" >&2
+        done
+        while true; do
+            read -rp "$(show_status 'question') Destination [1-${#tags[@]}, Enter=1, or a path]: " answer || return 1
+            [[ -z "$answer" ]] && answer=1
+            if [[ "$answer" =~ ^[0-9]+$ ]]; then
+                if (( answer >= 1 && answer <= ${#tags[@]} )); then
+                    choice="${tags[$((answer - 1))]}"
+                    break
+                fi
+                log_warn "Choose a number between 1 and ${#tags[@]}, or type a path."
+                continue
+            fi
+            choice="path:$answer"
+            break
+        done
+    fi
+
+    case "$choice" in
+        path:*)
+            out="${choice#path:}" ;;
+        browse)
+            out="$(ui_dselect "Bundle / Export Client" "Select the output directory:" "${last:-$export_dir}")" || return 1 ;;
+        custom)
+            out="$(ui_input "Bundle / Export Client" "Output directory:" "${last:-$export_dir}")" || return 1 ;;
+        *)
+            for i in "${!tags[@]}"; do
+                [[ "${tags[i]}" == "$choice" ]] && { out="${dirs[i]}"; break; }
+            done ;;
+    esac
+
+    [[ -n "$out" ]] || { log_warn "No destination selected."; return 1; }
+    out="${out/#\~/$HOME}"
+    # Remember an absolute path so the next run works from any cwd.
+    [[ "$out" == /* ]] || out="$PWD/$out"
+    save_bundle_dir_selection "$out"
+    printf '%s\n' "$out"
+}
+
 # pki_bundle_candidates [cert_dir]
 # Prints "<name>\t<ips>\t<groups>" for every certificate that can actually be
 # exported: a matching <name>.crt and <name>.key, not a CA and not revoked.
@@ -1627,6 +1738,9 @@ pki_bundle_client_zip() {
     local ca; ca="$(find_ca_crt "$cert_dir" || true)"
 
     out_dir="${out_dir/#\~/$HOME}"
+    # The archive is created from a temporary working directory, so a relative
+    # destination must be anchored to the caller's cwd first.
+    [[ "$out_dir" == /* ]] || out_dir="$PWD/$out_dir"
     [[ -f "$crt" ]] || { log_error "Certificate not found: $crt"; return 1; }
     [[ -f "$key" ]] || { log_error "Key not found: $key"; return 1; }
     [[ -n "$ca" && -f "$ca" ]] || { log_error "CA certificate not found for $name"; return 1; }
@@ -2458,11 +2572,8 @@ pki_bundle_client_menu() {
         *)  policy_path="" ;;
     esac
 
-    local default_out out
-    default_out="$(pki_default_bundle_dir)"
-    out="$(ui_dselect "Bundle / Export Client" "Output directory [${default_out}]:" "$default_out")" || return 0
-    out="${out/#\~/$HOME}"
-    [[ -z "$out" ]] && out="$default_out"
+    local out
+    out="$(pki_choose_bundle_dir "$cert_dir")" || return 0
     pki_bundle_client_zip "$name" "$out" "$cert_dir" "$policy_path" "" ""
     local rc=$?
     [[ -n "$fw_tmp" ]] && rm -f "$fw_tmp"

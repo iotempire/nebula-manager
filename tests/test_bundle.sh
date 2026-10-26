@@ -115,9 +115,10 @@ assert_file "CLI defaults to the start directory" "$SANDBOX/rundir/beta.one-nebu
 NEBULA_BUNDLE_DIR="$SANDBOX/envout" "$NM" --cert-dir "$KEYS" cert bundle beta.one >/dev/null 2>&1
 assert_file "CLI honours NEBULA_BUNDLE_DIR" "$SANDBOX/envout/beta.one-nebula-bundle.zip"
 
-# --- TUI: selection list + output prompt ------------------------------------
+# --- TUI: selection list + destination menu --------------------------------
 TUI_KEYS="$SANDBOX/tui-keys"
 TUI_OUT="$SANDBOX/tui-out"
+TUI_STATE="$XDG_CONFIG_HOME/nebula-manager/bundle-dir"
 mkdir -p "$TUI_KEYS"
 CERT_DIR="$TUI_KEYS" CA_NAME="tui-ca" pki_ca_create >/dev/null
 CERT_DIR="$TUI_KEYS" SIGN_NAME="solo" SIGN_IP="10.60.0.2/24" SIGN_GROUPS="laptops" pki_sign >/dev/null
@@ -126,7 +127,11 @@ out="$(printf '1\n1\n%s\n' "$TUI_OUT" | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle
 assert_eq "TUI bundle succeeds" "$?" "0"
 assert_contains "TUI lists the certificate" "$(cat "$ERR")" "solo"
 assert_contains "TUI shows the cert IP" "$(cat "$ERR")" "10.60.0.2/24"
+assert_contains "TUI offers the destination menu" "$(cat "$ERR")" "Where should the bundle be written?"
+assert_contains "TUI offers the cert export folder" "$(cat "$ERR")" "Certificate export folder: $TUI_KEYS/export"
+assert_contains "TUI offers Downloads" "$(cat "$ERR")" "Downloads: $HOME/Downloads/nebula-bundles"
 assert_file "TUI wrote the bundle" "$TUI_OUT/solo-nebula-bundle.zip"
+assert_eq "TUI remembers the destination" "$(cat "$TUI_STATE" 2>/dev/null)" "$TUI_OUT"
 
 # Typing a (partial) name at the selection prompt also works - no need to
 # choose "Type a certificate name manually".
@@ -135,11 +140,38 @@ out="$(printf 'sol\n1\n%s\n' "$TUI_TYPED_OUT" | CERT_DIR_SELECTED="$TUI_KEYS" pk
 assert_eq "TUI accepts a typed name at the menu" "$?" "0"
 assert_contains "TUI reports the typed-name match" "$out" "Matched 'sol' -> 'solo'"
 assert_file "TUI typed-name bundle written" "$TUI_TYPED_OUT/solo-nebula-bundle.zip"
+assert_eq "TUI updates the remembered destination" "$(cat "$TUI_STATE")" "$TUI_TYPED_OUT"
 
-# Empty input at the output prompt uses the sensible default (the start dir).
-mkdir -p "$SANDBOX/tui-default"
-out="$(cd "$SANDBOX/tui-default" && printf '1\n1\n\n' | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
-assert_file "TUI empty output prompt uses the default dir" "$SANDBOX/tui-default/solo-nebula-bundle.zip"
+# Enter picks the first entry, which is the last used destination.
+rm -f "$TUI_TYPED_OUT/solo-nebula-bundle.zip"
+out="$(printf '1\n1\n\n' | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
+assert_file "TUI Enter reuses the last destination" "$TUI_TYPED_OUT/solo-nebula-bundle.zip"
+
+# Without a remembered destination, Enter picks <cert-dir>/export.
+rm -f "$TUI_STATE"
+out="$(printf '1\n1\n\n' | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
+assert_file "TUI defaults to <cert-dir>/export" "$TUI_KEYS/export/solo-nebula-bundle.zip"
+
+# NEBULA_BUNDLE_DIR is offered first and chosen by Enter.
+rm -f "$TUI_STATE"
+TUI_ENV_OUT="$SANDBOX/tui-env-out"
+out="$(printf '1\n1\n\n' | NEBULA_BUNDLE_DIR="$TUI_ENV_OUT" CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
+assert_file "TUI honours NEBULA_BUNDLE_DIR" "$TUI_ENV_OUT/solo-nebula-bundle.zip"
+
+# ~/tmp is offered only when it exists.
+mkdir -p "$HOME/tmp"
+rm -f "$TUI_STATE"
+out="$(printf '1\n1\n\n' | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>"$ERR")"
+assert_contains "TUI offers ~/tmp when it exists" "$(cat "$ERR")" "Temporary (~/tmp): $HOME/tmp/nebula-bundles"
+
+# A bare relative path is accepted (no leading ./ or ~ needed).
+mkdir -p "$SANDBOX/tui-rel"
+out="$(cd "$SANDBOX/tui-rel" && printf '1\n1\nrelative-out\n' | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
+assert_file "TUI accepts a relative destination" "$SANDBOX/tui-rel/relative-out/solo-nebula-bundle.zip"
+
+# An out-of-range number re-prompts instead of becoming a directory name.
+out="$(printf '1\n1\n99\n%s\n' "$SANDBOX/tui-range" | CERT_DIR_SELECTED="$TUI_KEYS" pki_bundle_client_menu 2>/dev/null)"
+assert_file "TUI rejects an out-of-range number, then uses the path" "$SANDBOX/tui-range/solo-nebula-bundle.zip"
 
 # --- no candidates ----------------------------------------------------------
 mkdir -p "$SANDBOX/empty-keys"

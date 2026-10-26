@@ -354,11 +354,19 @@ export NEBULA_BUNDLE_SHARE_URL=https://class.example/bundles
 export NEBULA_BUNDLE_CROC_CODE=1234-abcd
 ```
 
-Destination precedence: `--out` → `NEBULA_BUNDLE_DIR` → the directory
-nebula-manager was started in → `~/Downloads` → `~/tmp` → `$TMPDIR`. The archive
-contains the cert, key, `ca.crt`, `config.yml.template`, **`install.sh`**,
-**`install.ps1`** and a `README.txt` with client instructions, and is written
-mode **0600** because it holds the private key.
+**CLI** destination precedence: `--out` → `NEBULA_BUNDLE_DIR` → the directory
+nebula-manager was started in → `~/Downloads` → `~/tmp` → `$TMPDIR`.
+
+**TUI** (*Certificates ▸ Bundle / Export*) first shows a destination menu with
+sensible defaults: `NEBULA_BUNDLE_DIR` (when set) → the **last used** folder →
+`<cert-dir>/export` → `~/Downloads/nebula-bundles` → `~/tmp/nebula-bundles`
+(only when `~/tmp` exists) → *Browse…* or *Type a path…*. Enter picks the first
+entry, and the choice is remembered in
+`~/.config/nebula-manager/bundle-dir`.
+
+The archive contains the cert, key, `ca.crt`, `config.yml.template`,
+**`install.sh`**, **`install.ps1`** and a `README.txt` with client instructions,
+and is written mode **0600** because it holds the private key.
 
 #### Self-contained installers
 
