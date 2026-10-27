@@ -34,8 +34,10 @@ die() { printf 'build_single: %s\n' "$*" >&2; exit 1; }
 grep -Fq -- "$START_MARK" "$ENTRY" || die "missing start marker in $ENTRY"
 grep -Fq -- "$END_MARK" "$ENTRY" || die "missing end marker in $ENTRY"
 
-MANAGER_VERSION="$(sed -n 's/^MANAGER_VERSION="\([^"]*\)"$/\1/p' "$ENTRY" | head -n1)"
-[[ -n "$MANAGER_VERSION" ]] || die "could not read MANAGER_VERSION from $ENTRY"
+VERSION_FILE="$REPO_ROOT/VERSION"
+[[ -r "$VERSION_FILE" ]] || die "missing VERSION file: $VERSION_FILE"
+MANAGER_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[[ "$MANAGER_VERSION" =~ ^[0-9][A-Za-z0-9._+-]*$ ]] || die "invalid version in $VERSION_FILE: '$MANAGER_VERSION'"
 ASSET_ID="$(for asset in "${ASSETS[@]}"; do cat "$REPO_ROOT/lib/$asset"; done | sha256sum | cut -c1-12)"
 [[ -n "$ASSET_ID" ]] || die "could not hash the embedded assets"
 
@@ -98,7 +100,7 @@ spliced="$tmpdir/nebula-manager"
     printf '%s\n' '    for f in "$root/nebula-manager.conf.template" "$root/bundle/install.sh" "$root/bundle/install.ps1" "$root/bundle/README.txt"; do'
     printf '%s\n' '        [[ -s "$f" ]] || { echo "nebula-manager: missing embedded asset $f" >&2; return 1; }'
     printf '%s\n' '    done'
-    printf '%s\n' '    : > "$marker"'
+    printf '%s\n' '    : > "$root/.complete"'
     printf '%s\n' '    MANAGER_LIB_DIR="$root"'
     printf '%s\n' '    export MANAGER_LIB_DIR'
     printf '%s\n' '}'
@@ -134,6 +136,11 @@ awk -v start="$START_MARK" -v end="$END_MARK" -v repl="$replacement" '
 ' "$ENTRY" > "$spliced"
 
 bash -n "$spliced" || die "generated script failed bash -n"
+# Embed the VERSION value as the fallback (the single file has no VERSION
+# file next to it unless the user places one there).
+sed "s/^MANAGER_VERSION=\"[^\"]*\"/MANAGER_VERSION=\"$MANAGER_VERSION\"/" "$spliced" > "$spliced.versioned"
+mv "$spliced.versioned" "$spliced"
+grep -Fq "MANAGER_VERSION=\"$MANAGER_VERSION\"" "$spliced" || die "failed to embed version $MANAGER_VERSION"
 
 mkdir -p "$OUT_DIR"
 cp "$spliced" "$OUT"

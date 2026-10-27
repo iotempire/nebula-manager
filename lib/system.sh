@@ -560,6 +560,10 @@ ensure_installed_to_bin_path() {
                     elevate cp -r "$current_lib/." "$libbase/lib/" \
                         && log_success "Installed modules to $libbase/lib" || log_error "Failed to install modules"
                 fi
+                if [[ -f "$MANAGER_ROOT/VERSION" ]]; then
+                    elevate cp "$MANAGER_ROOT/VERSION" "$libbase/VERSION" \
+                        && log_success "Installed VERSION" || log_error "Failed to install VERSION"
+                fi
             fi
             ;;
         *) log_info "Skipped installation." ;;
@@ -1904,6 +1908,8 @@ perform_manager_update() {
     fi
 
     mkdir -p "$tmp/lib/bundle"
+    curl -fsSL "${REPO_BASE}/VERSION" -o "$tmp/VERSION" \
+        || { log_error "Failed to download VERSION."; rm -rf "$tmp"; return 1; }
     local m
     for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh fleet.sh nebula-manager.conf.template; do
         curl -fsSL "${REPO_BASE}/lib/${m}" -o "$tmp/lib/${m}" \
@@ -1915,12 +1921,15 @@ perform_manager_update() {
     done
 
     local target="${SCRIPT_PATH:-$0}" libdir="${MANAGER_LIB_DIR:-}"
+    local verdir; verdir="$(dirname "$libdir")"
     if path_requires_root "$target"; then
         elevate cp "$entry" "$target" && elevate chmod +x "$target"
         [[ -n "$libdir" ]] && elevate cp -a "$tmp/lib/." "$libdir/"
+        [[ -n "$libdir" ]] && elevate cp "$tmp/VERSION" "$verdir/VERSION"
     else
         cp "$entry" "$target" && chmod +x "$target"
         [[ -n "$libdir" ]] && cp -a "$tmp/lib/." "$libdir/"
+        [[ -n "$libdir" ]] && cp "$tmp/VERSION" "$verdir/VERSION"
     fi
     rm -rf "$tmp"
     log_success "Updated to version v$latest. Please rerun."

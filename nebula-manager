@@ -21,7 +21,8 @@ set -o pipefail
 ###################################################################
 ########################## Configuration ##########################
 ###################################################################
-MANAGER_VERSION="2.0.0"
+# Fallback only: VERSION (or the single-file build) supplies the real value.
+MANAGER_VERSION="0.0.0-dev"
 # The nebula-manager.conf path is resolved after the modules load by
 # resolve_server_conf(): --config / $NEBULA_MANAGER_CONF -> existing /etc
 # config -> per-user config. The per-user default avoids needing root on
@@ -37,6 +38,20 @@ VERSION_CACHE_TTL_SECONDS=$((6 * 3600))
 # init_remote_urls() (after the modules load), so forks check themselves
 # instead of always checking upstream. Override with NEBULA_MANAGER_REPO.
 MANAGER_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# VERSION is the single source of truth; 0.0.0-dev is only a fallback for
+# single-file builds (which embed the value at build time) and for installed
+# copies that predate the VERSION file.
+for _nm_vf in \
+    "$MANAGER_ROOT/VERSION" \
+    "$MANAGER_ROOT/../lib/nebula-manager/VERSION" \
+    "$MANAGER_ROOT/lib/nebula-manager/VERSION"
+do
+    [[ -r "$_nm_vf" ]] || continue
+    IFS= read -r _nm_version < "$_nm_vf" || _nm_version=""
+    [[ "$_nm_version" =~ ^[0-9][A-Za-z0-9._+-]*$ ]] && MANAGER_VERSION="$_nm_version"
+    break
+done
+unset _nm_vf _nm_version
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 AUTO_UPDATE_CMD="$SCRIPT_PATH --auto-update-nebula"
 CRON_COMMENT="# Auto-update Nebula"

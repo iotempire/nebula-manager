@@ -8,6 +8,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 TEST_LABEL="update check & repo resolution"
 harness_init
 
+# VERSION is the source of truth; the update workflow mirrors it here.
+assert_eq "latest_version.txt matches VERSION" \
+    "$(tr -d '[:space:]' < "$REPO_ROOT/latest_version.txt")" \
+    "$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+
 # --- repo slug normalization ---
 assert_eq "https .git suffix" "$(_normalize_repo_slug 'https://github.com/me/nebula-manager.git')" "me/nebula-manager"
 assert_eq "https plain"       "$(_normalize_repo_slug 'https://github.com/me/nebula-manager')"     "me/nebula-manager"

@@ -7,6 +7,7 @@ concurrency:
 on:
   push:
     paths:
+      - VERSION
       - nebula-manager
     branches:
       - main
@@ -23,7 +24,7 @@ jobs:
 
       - name: Extract version and update file
         run: |
-          version=$(grep -E '^MANAGER_VERSION=' nebula-manager | cut -d'"' -f2)
+          version=$(tr -d '[:space:]' < VERSION)
           echo "$version" > latest_version.txt
 
       - name: Commit and push updated version file

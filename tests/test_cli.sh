@@ -10,6 +10,8 @@ NM="$REPO_ROOT/nebula-manager"
 
 # --- version / help ---
 assert_contains "--version prints version" "$("$NM" --version)" "Nebula Manager v"
+expected_version="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+assert_contains "--version matches VERSION" "$("$NM" --version)" "v${expected_version}"
 assert_contains "--help prints usage"     "$("$NM" --help)"    "Usage:"
 assert_contains "fleet help lists croc"   "$("$NM" fleet --help 2>&1)" "fleet croc"
 

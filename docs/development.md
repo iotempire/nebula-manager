@@ -13,6 +13,7 @@ The tool is a thin entrypoint plus modules under `lib/`:
 
 ```
 nebula-manager          # entrypoint: arg parsing, dispatch, TUI root + Manager Setup menu
+VERSION                 # single source of truth for MANAGER_VERSION
 lib/
   ui.sh                 # colours, status badges, whiptail/dialog + plain menus
   pki.sh                # CA, signing, inspection, workspaces, client bundling, node configs
@@ -44,20 +45,26 @@ make build              # or: make release   (alias)
 
 `build_single.sh`:
 
-1. splices the modules into the entrypoint between the
+1. reads `VERSION` (the single source of truth) and embeds it as the
+   `MANAGER_VERSION` fallback in the generated file;
+2. splices the modules into the entrypoint between the
    `# >>> BUNDLE:MODULES >>>` / `# <<< BUNDLE:MODULES <<<` markers, so the
    generated file contains ordinary function definitions and never `source`s
    `lib/`;
-2. embeds the four runtime assets (`lib/nebula-manager.conf.template` and
+3. embeds the four runtime assets (`lib/nebula-manager.conf.template` and
    `lib/bundle/{install.sh,install.ps1,README.txt}`) as quoted here-docs. The
    build fails if an asset contains the here-doc delimiter;
-3. writes `dist/nebula-manager` and `dist/nebula-manager.sha256` (the artifact
+4. writes `dist/nebula-manager` and `dist/nebula-manager.sha256` (the artifact
    is a release asset; `dist/` is git-ignored).
 
 Pushing a tag matching `v*` runs `.github/workflows/release-single-file.yml`,
 which builds the artifact and attaches both files to the GitHub Release (a
 manual run takes a tag as input). That is the asset used by the one-`curl`
 installation and by self-update.
+
+Release checklist: bump `VERSION`, commit, then tag the same value
+(`git tag "v$(cat VERSION)" && git push origin "v$(cat VERSION)"`). The
+`latest_version.txt` workflow mirrors `VERSION` on `main`.
 
 On first run the generated script materialises the embedded assets into
 `${XDG_CACHE_HOME:-$HOME/.cache}/nebula-manager/single-file-assets/<version>-<asset-hash>/`

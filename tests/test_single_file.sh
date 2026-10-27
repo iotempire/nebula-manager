@@ -58,6 +58,8 @@ run_single() {
 
 out="$(run_single --version 2>&1)"
 assert_contains "--version works" "$out" "Nebula Manager v"
+expected_version="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+assert_contains "single file embeds VERSION" "$out" "v${expected_version}"
 
 out="$(run_single --help 2>&1)"
 assert_contains "--help works" "$out" "Usage:"
