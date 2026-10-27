@@ -946,12 +946,19 @@ firewall:
   inbound:
     - port: any
       proto: any
-      group: "ulno"     # or groups: ["ulno", "admin"]
+      group: "ulno"
+    # Several groups? Emit one rule per group: Nebula AND-s a `groups:` list
+    # (a peer would have to carry all of them), so do not use groups: here.
+    # - port: any
+    #   proto: any
+    #   group: "admin"
   outbound:
     - port: any
       proto: any
       host: any
 ```
+
+`--from-group ulno,admin` therefore produces two inbound rules (OR semantics).
 
 `--from-group` also creates (or reuses) a policy pack named `group-ulno` under
 `~/.config/nebula-manager/policies/`, and remembers it per certificate, so
@@ -1670,6 +1677,12 @@ is *already running*, discover the installation and offer to generate
 - [x] **Batch group editing** – selector + add/remove/move/set/rename/prune.
 - [x] **Firewall policy packs** – group-targeted packs embedded in bundles,
       applied locally, or exported per host for an existing fleet.
+- [x] **Batch node firewalls** – `cert firewall --from-group …` rewrites the
+      stored per-node configs (lighthouse-safe, auto policy pack, remembered).
+- [ ] **Firewall editor multi-group semantics** – the per-host rule editor still
+      writes `groups: [a,b]` when several groups are picked. Nebula AND-s that
+      list, so “allow from any of these groups” must emit one `group:` rule per
+      selection (as the batch path now does).
 - [x] **Certificate-store history** – action log, datestamped backups, optional
       git snapshots (private keys always excluded).
 - [x] **Remote fleet push** – `fleet ssh` fetches the remote config, merges a

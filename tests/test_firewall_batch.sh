@@ -132,6 +132,21 @@ else
 fi
 assert_eq "refused run left the config alone" "$(sha "$keys/a1.mesh.yml")" "$a1_dry"
 
+# --- multiple groups must become one rule each (Nebula ANDs groups:) --------
+"$NM" --cert-dir "$keys" cert firewall --from-group ulno,lighthouse \
+    --select cert:a2.mesh --include-lighthouse --yes >/dev/null 2>&1
+cfg="$keys/a2.mesh.yml"
+assert_eq "multi-group: inbound has exactly two rules" \
+    "$(yq -r '.firewall.inbound | length' "$cfg")" "2"
+assert_eq "multi-group: first rule allows ulno" \
+    "$(yq -r '.firewall.inbound[0].group' "$cfg")" "ulno"
+assert_eq "multi-group: second rule allows lighthouse" \
+    "$(yq -r '.firewall.inbound[1].group' "$cfg")" "lighthouse"
+assert_eq "multi-group: no AND groups list is emitted" \
+    "$(yq -r '.firewall.inbound[0].groups' "$cfg")" "null"
+mpack="$XDG_CONFIG_HOME/nebula-manager/policies/group-ulno-lighthouse.yml"
+assert_file "multi-group policy pack created" "$mpack"
+
 assert_eq "no sudo used anywhere" "$(sudo_count)" "0"
 
 harness_summary

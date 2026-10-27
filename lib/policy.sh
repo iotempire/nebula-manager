@@ -250,8 +250,13 @@ node_fw_describe() {
 # node_fw_render_group_policy <groups_csv> ; prints a temp policy file path.
 # Inbound: allow only the listed certificate group(s). Outbound: allow all.
 # This is the "only <group> may connect in" policy used by `cert firewall`.
+# node_fw_render_group_policy <groups_csv> ; prints a temp policy file path.
+# Inbound: allow the listed certificate group(s). Outbound: allow all.
+# Nebula AND-s a `groups:` list (the peer must carry every group), so multiple
+# groups are emitted as one rule each (OR semantics).
+# This is the "only <group> may connect in" policy used by `cert firewall`.
 node_fw_render_group_policy() {
-    local csv="${1:-}" f g joined
+    local csv="${1:-}" f g
     [[ -n "$csv" ]] || return 1
     local -a gs=()
     IFS=',' read -ra gs <<< "$csv"
@@ -262,12 +267,12 @@ node_fw_render_group_policy() {
     done
     f="$(mktemp)" || return 1
     {
-        printf 'firewall:\n  inbound:\n    - port: any\n      proto: any\n'
-        if (( ${#gs[@]} == 1 )); then
-            printf '      group: "%s"\n' "${gs[0]}"
-        else
-            printf '      groups: [%s]\n' "$(printf '"%s", ' "${gs[@]}" | sed 's/, $//')"
-        fi
+        printf 'firewall:\n  inbound:\n'
+        for g in "${gs[@]}"; do
+            g="${g#"${g%%[![:space:]]*}"}"
+            g="${g%"${g##*[![:space:]]}"}"
+            printf '    - port: any\n      proto: any\n      group: "%s"\n' "$g"
+        done
         printf '  outbound:\n    - port: any\n      proto: any\n      host: any\n'
     } > "$f"
     printf '%s' "$f"
