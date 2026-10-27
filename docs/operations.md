@@ -39,7 +39,7 @@ Looking for more answers? Check the [Full FAQ on GitHub Wiki »](https://github.
   systemd unit. Pod/container support is tracked in the [Roadmap](roadmap.md).
 - **Update checks follow your source repo, not upstream.** The version check and
   self-update resolve the repo as `NEBULA_MANAGER_REPO` → git `origin` → built-in
-  upstream (`jordanhillis/nebula-manager`), so a fork checks itself. An update is
+  default (`iotempire/nebula-manager`), so a fork checks itself. An update is
   only offered when the published version is **strictly newer** (semantic
   comparison), never as a downgrade. Git checkouts are never auto-overwritten —
   the tool tells you to `git pull` instead.
@@ -54,7 +54,7 @@ in this order:
 
 1. `NEBULA_MANAGER_REPO` (`owner/repo`), if set
 2. the git remote **`origin`** of the checkout it is running from
-3. the built-in upstream: **`jordanhillis/nebula-manager`**
+3. the built-in default: **`iotempire/nebula-manager`**
 
 So a fork checks *itself* by default. An update is only offered when the
 published version is **strictly newer** than the running one (version-aware

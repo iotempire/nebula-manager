@@ -183,7 +183,7 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 | `NEBULA_MANAGER_REF` | Git ref (branch) used for update checks (default `main`) |
 | `NEBULA_MANAGER_SINGLE_URL` | Override the single-file release/update asset URL (default: `releases/latest/download/nebula-manager` of the resolved repo) |
 | `NEBULA_MANAGER_SINGLE_FILE` | Set automatically by the single-file build (`1`); do not set it for a modular checkout |
-| `NEBULA_MANAGER_DEFAULT_REPO` | Last-resort repo when neither env nor git `origin` is available (default `jordanhillis/nebula-manager`) |
+| `NEBULA_MANAGER_DEFAULT_REPO` | Last-resort repo when neither env nor git `origin` is available (default `iotempire/nebula-manager`) |
 | `NEBULA_UI` | UI backend. Default (*unset*/`auto`) = **plain numbered menus**; `whiptail`/`dialog` are used automatically for file/dir browsing when available, or set one to force a curses UI everywhere |
 | `NEBULA_NO_PROMPT` | Set to `1` to never prompt; unreadable privileged files are skipped instead of read via sudo (used internally for state detection) |
 | `NEBULA_DEFAULT_PORT` | Fallback Nebula listen port for diagnostics (default `4242`) |

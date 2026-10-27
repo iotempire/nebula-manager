@@ -1,12 +1,12 @@
-<p align="center"><a href="https://github.com/ulno/nebula-manager/"><img src="resources/img/banner-web.png" alt="Nebula Manager"></a></p>
+<p align="center"><a href="https://github.com/iotempire/nebula-manager/"><img src="resources/img/banner-web.png" alt="Nebula Manager"></a></p>
 
 <p align="center">
   <a href="/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <a href="https://www.gnu.org/software/bash/"><img alt="Shell: Bash" src="https://img.shields.io/badge/language-bash-blue.svg"></a>
   <a href="https://kernel.org/"><img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Linux-informational?style=flat-square"></a>
   <a href="https://github.com/slackhq/nebula"><img alt="Nebula" src="https://img.shields.io/badge/nebula-supported-brightgreen"></a>
-  <a href="https://github.com/ulno/nebula-manager/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/ulno/nebula-manager"></a>
-  <a href="https://github.com/ulno/nebula-manager/releases"><img alt="Latest Release" src="https://img.shields.io/github/releases/ulno/nebula-manager?sort=semver&display_name=tag&style=flat-square"></a>
+  <a href="https://github.com/iotempire/nebula-manager/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/iotempire/nebula-manager"></a>
+  <a href="https://github.com/iotempire/nebula-manager/releases"><img alt="Latest Release" src="https://img.shields.io/github/releases/iotempire/nebula-manager?sort=semver&display_name=tag&style=flat-square"></a>
 </p>
 
 > **Nebula Manager — academic edition.** ulno's academic spin on Jordan Hillis'
@@ -61,7 +61,7 @@ ulno's academic spin - orig: Jordan Hillis v2.0.0
 ### A. Nebula is already running on this host
 
 ```bash
-git clone https://github.com/ulno/nebula-manager.git
+git clone https://github.com/iotempire/nebula-manager.git
 cd nebula-manager
 ./nebula-manager import     # detects service, config and certs; proposes a manager config
 ./nebula-manager            # opens the plain-text menu
@@ -196,8 +196,8 @@ file** with the modules and runtime assets embedded, so deployment can be one
 ### Single-file release (one curl)
 
 ```bash
-curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
-curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
+curl -fsSL https://github.com/iotempire/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
+curl -fsSL https://github.com/iotempire/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
 sha256sum -c nebula-manager.sha256
 chmod +x nebula-manager
 ./nebula-manager --version
@@ -218,7 +218,7 @@ make build          # -> dist/nebula-manager + dist/nebula-manager.sha256
 ### From source (development)
 
 ```bash
-git clone https://github.com/ulno/nebula-manager.git
+git clone https://github.com/iotempire/nebula-manager.git
 cd nebula-manager
 ./nebula-manager          # first run offers Manager Setup
 ```
@@ -332,7 +332,7 @@ see [Development](docs/development.md) for the test harness and checksum rules.
 
 - Original project and v2.0.0: [Jordan Hillis](https://github.com/jordanhillis)
 - Academic edition, extensions and documentation: **ulno**
-  ([ulno/nebula-manager](https://github.com/ulno/nebula-manager))
+  ([iotempire/nebula-manager](https://github.com/iotempire/nebula-manager))
 
 The least-privilege refactor, modular `lib/` layout, `import` wizard, server
 management, plain-first TUI, mobile certificates, per-node configs, batch

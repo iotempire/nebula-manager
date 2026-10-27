@@ -2058,7 +2058,7 @@ pki_firewall_apply_selected() {
     (( failed == 0 ))
 }
 
-# Headless: nebula-manager cert firewall --from-group ulno [--select ...]
+# Headless: nebula-manager cert firewall --from-group instructor [--select ...]
 pki_firewall_cli() {
     local cert_dir="" mode="" policy_ref="" group_csv="" policy="" pack="" desc="" tmp=""
     local dry=0 yes=0 include_lh=0
@@ -2104,8 +2104,8 @@ Options:
   --yes, -y             do not ask (required when stdin is not a TTY)
 
 Example:
-  nebula-manager cert firewall --from-group ulno --select all --yes
-    # every node except the lighthouse accepts inbound only from group 'ulno'
+  nebula-manager cert firewall --from-group instructor --select all --yes
+    # every node except the lighthouse accepts inbound only from that group
 EOF
                 return 0 ;;
             -*) log_error "Unknown option for 'cert firewall': $1"; return 2 ;;
@@ -2214,7 +2214,7 @@ pki_firewall_batch_tui() {
     local -a pairs=( host "Copy this host's firewall (detected)"
                      permissive "Permissive: allow all inbound/outbound"
                      default "Nebula defaults: outbound allow, inbound drop"
-                     group "Inbound only from a group (e.g. ulno)"
+                     group "Inbound only from a group (e.g. instructor)"
                      skip "Forget the saved choice (detected firewall)" )
     if declare -F policy_pairs >/dev/null && policy_pairs; then
         local i

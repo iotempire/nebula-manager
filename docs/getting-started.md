@@ -12,7 +12,7 @@ installation — and explains the tool's own configuration file.
 ### A. Nebula is already running on this host
 
 ```bash
-git clone https://github.com/ulno/nebula-manager.git
+git clone https://github.com/iotempire/nebula-manager.git
 cd nebula-manager
 ./nebula-manager import     # detect service, config, certs; write nebula-manager.conf
 ./nebula-manager            # opens the menu with the detected state
@@ -67,8 +67,8 @@ self-contained single-file release, clone the repository, or fetch the modules.
 ### 🔹 Option 1: Single-file release (one curl)
 
 ```bash
-curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
-curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
+curl -fsSL https://github.com/iotempire/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
+curl -fsSL https://github.com/iotempire/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
 sha256sum -c nebula-manager.sha256
 chmod +x nebula-manager
 ./nebula-manager            # no sudo needed
@@ -82,7 +82,7 @@ asset (override with `NEBULA_MANAGER_SINGLE_URL`).
 ### 🔹 Option 2: Git clone (recommended for development)
 
 ```bash
-git clone https://github.com/ulno/nebula-manager.git
+git clone https://github.com/iotempire/nebula-manager.git
 cd nebula-manager
 ./nebula-manager            # no sudo needed
 ```
@@ -94,7 +94,7 @@ Build the single-file artifact locally with `make build` (or
 
 ```bash
 mkdir -p nebula-manager/lib/bundle && cd nebula-manager
-base=https://raw.githubusercontent.com/ulno/nebula-manager/refs/heads/main
+base=https://raw.githubusercontent.com/iotempire/nebula-manager/refs/heads/main
 curl -fsSL "$base/nebula-manager" -o nebula-manager
 for m in ui.sh pki.sh bench.sh system.sh import.sh policy.sh select.sh store.sh fleet.sh nebula-manager.conf.template; do
   curl -fsSL "$base/lib/$m" -o "lib/$m"

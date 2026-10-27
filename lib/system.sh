@@ -1797,7 +1797,7 @@ select_nebula_server() {
 ###################################################################
 # The update check follows the repo this copy came from, so a fork checks
 # itself instead of upstream:
-#   $NEBULA_MANAGER_REPO (owner/repo)  ->  git 'origin'  ->  built-in upstream.
+#   $NEBULA_MANAGER_REPO (owner/repo)  ->  git 'origin'  ->  built-in default.
 # An update is only offered when the published version is strictly NEWER.
 
 _normalize_repo_slug() {
@@ -1821,7 +1821,7 @@ manager_remote_repo() {
         local slug; slug="$(_normalize_repo_slug "$url")"
         case "$slug" in */*) printf '%s' "$slug"; return 0 ;; esac
     fi
-    printf '%s' "${NEBULA_MANAGER_DEFAULT_REPO:-jordanhillis/nebula-manager}"
+    printf '%s' "${NEBULA_MANAGER_DEFAULT_REPO:-iotempire/nebula-manager}"
 }
 
 manager_remote_ref() { printf '%s' "${NEBULA_MANAGER_REF:-main}"; }

@@ -171,6 +171,37 @@ tracked in [Roadmap ▸ Manual platform confirmation](roadmap.md#manual-platform
 `make lint` syntax-checks the entrypoint and all modules (and runs `shellcheck`
 when available).
 
+## 🌿 How this fork relates to upstream
+
+This repository is **`iotempire/nebula-manager`**, a fork of
+[`jordanhillis/nebula-manager`](https://github.com/jordanhillis/nebula-manager).
+The academic edition (v2.0.0) sits directly on top of upstream's `main`;
+upstream's v1.1.0 tip is part of this history.
+
+```bash
+git remote -v             # origin -> this fork, upstream -> Jordan's project
+git fetch upstream        # pick up new upstream commits
+git rebase upstream/main  # replay the academic edition on top (stays linear)
+git push --force-with-lease origin main
+```
+
+Guidelines that keep this workable:
+
+- **Don't rewrite `main`** without coordinating. Releases, the certificate-store
+  history and every clone depend on it. (The history was rebuilt once after a
+  credential leak, so that it again descends from the genuine upstream commit
+  chain — that rebuild is why old SHAs are no longer valid.)
+- **Update checks follow `origin`**, so this fork checks its own releases. The
+  single-file build has no `.git` and falls back to `iotempire/nebula-manager`;
+  set `NEBULA_MANAGER_REPO=jordanhillis/nebula-manager` to compare against the
+  original project instead.
+- **Releases** (the one-curl `dist/nebula-manager` asset) are published from
+  this fork's `v*` tags by `.github/workflows/release-single-file.yml`:
+  `git tag "v$(cat VERSION)" && git push origin "v$(cat VERSION)"`.
+- **Upstream pull requests** should come from a separate branch, not `main`, so
+  releases aren't blocked by review latency. Keep each commit self-contained
+  and `make lint && ./run_tests.sh` green before pushing it.
+
 ## 🔒 Security Notes
 - The tool runs **unprivileged**; review any `sudo` prompt before approving it.
 - Keep backups of your `config.yml` and certificates before making changes.

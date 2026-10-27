@@ -103,7 +103,7 @@ state behind to undo it.
 
 ## Upstream, versions and credits
 
-- Academic fork: <https://github.com/ulno/nebula-manager>
+- Academic fork: <https://github.com/iotempire/nebula-manager>
 - Original project: <https://github.com/jordanhillis/nebula-manager>
 - Nebula: <https://github.com/slackhq/nebula>
 

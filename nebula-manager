@@ -448,7 +448,7 @@ print_paths() {
     printf 'debug:     %s\n' "${DEBUG:-log}"
     printf 'clear-screen: %s\n' "${NEBULA_CLEAR_SCREEN:-0}"
     printf 'info-cache: %s\n' "$(nebula_info_cache_file)"
-    printf 'update-repo: %s@%s\n' "${REPO_SLUG:-jordanhillis/nebula-manager}" "${REPO_REF:-main}"
+    printf 'update-repo: %s@%s\n' "${REPO_SLUG:-iotempire/nebula-manager}" "${REPO_REF:-main}"
 }
 
 # Consume global flags, leaving the (sub)command + its args in REMAINING_ARGS.

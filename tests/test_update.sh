@@ -23,7 +23,7 @@ assert_eq "ssh url form"      "$(_normalize_repo_slug 'ssh://git@github.com/me/n
 export NEBULA_MANAGER_REPO="me/fork"
 assert_eq "env repo override wins" "$(manager_remote_repo)" "me/fork"
 unset NEBULA_MANAGER_REPO
-assert_eq "falls back to upstream" "$(manager_remote_repo)" "jordanhillis/nebula-manager"
+assert_eq "falls back to this project's repo" "$(manager_remote_repo)" "iotempire/nebula-manager"
 
 # --- version comparison ---
 if version_gt 2.0.0 1.1.0; then _ok "2.0.0 > 1.1.0"; else _bad "2.0.0 > 1.1.0"; fi
