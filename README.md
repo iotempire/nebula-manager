@@ -1,12 +1,12 @@
 <p align="center"><a href="https://github.com/iotempire/nebula-manager/"><img src="resources/img/banner-web.png" alt="Nebula Manager"></a></p>
 
 <p align="center">
-  <a href="/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-  <a href="https://www.gnu.org/software/bash/"><img alt="Shell: Bash" src="https://img.shields.io/badge/language-bash-blue.svg"></a>
+  <a href="/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square"></a>
+  <a href="https://www.gnu.org/software/bash/"><img alt="Shell: Bash" src="https://img.shields.io/badge/language-bash-blue.svg?style=flat-square"></a>
   <a href="https://kernel.org/"><img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Linux-informational?style=flat-square"></a>
-  <a href="https://github.com/slackhq/nebula"><img alt="Nebula" src="https://img.shields.io/badge/nebula-supported-brightgreen"></a>
-  <a href="https://github.com/iotempire/nebula-manager/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/iotempire/nebula-manager"></a>
-  <a href="https://github.com/iotempire/nebula-manager/releases"><img alt="Latest Release" src="https://img.shields.io/github/releases/iotempire/nebula-manager?sort=semver&display_name=tag&style=flat-square"></a>
+  <a href="https://github.com/slackhq/nebula"><img alt="Nebula" src="https://img.shields.io/badge/nebula-supported-brightgreen?style=flat-square"></a>
+  <a href="https://github.com/iotempire/nebula-manager/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/iotempire/nebula-manager?style=flat-square"></a>
+  <a href="https://github.com/iotempire/nebula-manager/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/iotempire/nebula-manager?sort=semver&display_name=tag&style=flat-square"></a>
 </p>
 
 > **Nebula Manager — academic edition.** ulno's academic spin on Jordan Hillis'
