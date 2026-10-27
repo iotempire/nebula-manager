@@ -44,6 +44,10 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       policy/firewall locally, shows a diff, uploads with a timestamped backup,
       validates and restarts. `fleet croc` serves self-contained bundles with one
       code per node (the recommended classroom mass-deployment path).
+- [x] **Single-file release build** – `make build` (`make release` alias)
+      generates `dist/nebula-manager` with modules and runtime assets embedded,
+      plus a checksum. The modular `lib/` tree stays canonical; the artifact is
+      attached to GitHub Releases and supports a one-`curl` install/update.
 - [ ] **Real-network confirmation for fleet** – run `fleet croc` between two
       machines over croc's relay (including behind eduroam/NAT) and run
       `fleet ssh` against a node with key auth + passwordless sudo.

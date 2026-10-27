@@ -161,6 +161,7 @@ Every menu action has a headless equivalent:
 | **Adoption** | `import` discovers a running Nebula and proposes `nebula-manager.conf` → [getting-started.md](docs/getting-started.md) |
 | **Safety** | dry runs, diffs, `*.crt.bak`, datestamped `backups/`, optional git snapshots, action log → [certificates.md](docs/certificates.md#store-history-backups--git) |
 | **Updates** | Nebula update with rollback; self-update check with fork/upstream resolution → [operations.md](docs/operations.md#update-checks--forks) |
+| **Release** | one-`curl` single-file artifact (`make build`), checksum, self-update → [development.md](docs/development.md#single-file-release-build) |
 
 ---
 
@@ -187,8 +188,34 @@ Every menu action has a headless equivalent:
 
 ## Installation
 
-The implementation is `nebula-manager` **plus the `lib/` directory**; both are
-required. A single-file download will not work.
+Development happens in the modular source tree (`nebula-manager` **plus the
+`lib/` directory**). Every GitHub Release also ships a **self-contained single
+file** with the modules and runtime assets embedded, so deployment can be one
+`curl`.
+
+### Single-file release (one curl)
+
+```bash
+curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
+curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
+sha256sum -c nebula-manager.sha256
+chmod +x nebula-manager
+./nebula-manager --version
+```
+
+The single file needs no `lib/` directory: on first run it materialises the
+embedded config template and client-bundle installers into
+`${XDG_CACHE_HOME:-~/.cache}/nebula-manager/single-file-assets/<version>-<asset-hash>/`.
+Self-update uses the same release asset; point a fork at its own asset with
+`NEBULA_MANAGER_SINGLE_URL`.
+
+Build it locally with:
+
+```bash
+make build          # -> dist/nebula-manager + dist/nebula-manager.sha256
+```
+
+### From source (development)
 
 ```bash
 git clone https://github.com/ulno/nebula-manager.git
@@ -204,9 +231,9 @@ sudo install -m755 nebula-manager /usr/local/bin/nebula-manager
 sudo cp -a lib/. /usr/local/lib/nebula-manager/lib/
 ```
 
-The entrypoint finds `lib/` via `$NEBULA_MANAGER_LIB`, `<dir of
+The modular entrypoint finds `lib/` via `$NEBULA_MANAGER_LIB`, `<dir of
 entrypoint>/lib`, `/usr/local/lib/nebula-manager/lib`, or
-`/usr/lib/nebula-manager/lib`.
+`/usr/lib/nebula-manager/lib`. The single-file build needs none of this.
 
 ### Dependencies
 
@@ -269,6 +296,7 @@ and **[docs/operations.md](docs/operations.md)**.
 ```bash
 ./run_tests.sh     # or: make test
 make lint          # bash -n + shellcheck (errors) over entrypoint, modules and tests
+make build         # dist/nebula-manager (single-file release artifact)
 ```
 
 The suite is dependency-free: a mock `sudo` records every invocation, so tests

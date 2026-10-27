@@ -24,12 +24,48 @@ lib/
   store.sh              # store action log, backups, optional git snapshots
   fleet.sh              # croc mass sharing, SSH push, reachability probing
 nebula-manager.conf.template  # bundled config template (offline first-run)
+build_single.sh         # generate dist/nebula-manager (single-file release)
 tests/                  # standalone mock-driven Bash test harness
 run_tests.sh            # test runner (also: make test)
 ```
 
 `nebula-manager.sh` is kept as a thin **backwards-compatibility shim** that
 re-execs the real entrypoint.
+
+### Single-file release build
+
+`lib/` remains the canonical source; the release artifact is generated, never
+edited by hand.
+
+```bash
+make build              # or: make release   (alias)
+./build_single.sh       # or: ./build_single.sh /tmp/nebula-manager
+```
+
+`build_single.sh`:
+
+1. splices the modules into the entrypoint between the
+   `# >>> BUNDLE:MODULES >>>` / `# <<< BUNDLE:MODULES <<<` markers, so the
+   generated file contains ordinary function definitions and never `source`s
+   `lib/`;
+2. embeds the four runtime assets (`lib/nebula-manager.conf.template` and
+   `lib/bundle/{install.sh,install.ps1,README.txt}`) as quoted here-docs. The
+   build fails if an asset contains the here-doc delimiter;
+3. writes `dist/nebula-manager` and `dist/nebula-manager.sha256` (the artifact
+   is a release asset; `dist/` is git-ignored).
+
+Pushing a tag matching `v*` runs `.github/workflows/release-single-file.yml`,
+which builds the artifact and attaches both files to the GitHub Release (a
+manual run takes a tag as input). That is the asset used by the one-`curl`
+installation and by self-update.
+
+On first run the generated script materialises the embedded assets into
+`${XDG_CACHE_HOME:-$HOME/.cache}/nebula-manager/single-file-assets/<version>-<asset-hash>/`
+(creating `bundle/` inside), points `MANAGER_LIB_DIR` at that directory and sets
+`NEBULA_MANAGER_SINGLE_FILE=1`. Later runs reuse the cache, so the template and
+bundle installers work offline. In single-file mode the self-update downloads
+only the release asset and its `.sha256` (override the source with
+`NEBULA_MANAGER_SINGLE_URL`).
 
 ### Privilege model
 
@@ -87,6 +123,7 @@ What it covers:
 | `tests/test_workspace.sh` | certificate workspace selection + "already known" detection |
 | `tests/test_workspace_menu.sh` | workspace selector: detected stores listed, number *or* typed path accepted, invalid input re-prompts, env-override warning |
 | `tests/test_conf.sh` | config path resolution: user-first, `--config`/env override, bundled template + `config init` offline |
+| `tests/test_single_file.sh` | single-file build: no `lib/` sourcing, offline embedded config template + client-bundle assets, PKI/list/config/bundle from a standalone executable, no sudo |
 | `tests/test_setup.sh` | Manager Setup state summary (detected config/instances/workspace), `config_use_file` validation, `config remove` without sudo for user paths |
 | `tests/test_tui_menu.sh` | entrypoint Manager Setup/bootstrap menu wiring (import/browse/delete/reload/exit), the state-line refresh hook, the instance-context block and the main-menu labels |
 | `tests/test_sysinfo.sh` | header is cache-first (no sudo/prompt), falls back to the `nebula*` interface guess, points at Diagnostics; unreadable configs never spew `Permission denied` |

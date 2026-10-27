@@ -800,6 +800,7 @@ The installer:
 | **`import`** (discover a running Nebula) and **`import --bundle --start`** (install + service) |
 | **`instance add/list/remove/enable/disable`** (`server` alias) |
 | **Fleet croc** mass deployment (one code per node) |
+| **Single-file release build** (`make build`, one-curl install/update) |
 | **Fleet SSH** probe, config/firewall push, validation and restart |
 | Windows-native bundle installer (`install.ps1`) |
 | Update checks and auto-update |

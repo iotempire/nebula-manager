@@ -60,10 +60,26 @@ in the [usage & CLI reference](usage.md).
 
 ## 📥 Installation
 
-> **Note (v2):** the implementation is now `nebula-manager` **plus the `lib/`
-> directory**. Both are required — a lone single-file download won't work.
+The canonical source is `nebula-manager` **plus the `lib/` directory**;
+`lib/` stays where development happens. For deployment you can use the
+self-contained single-file release, clone the repository, or fetch the modules.
 
-### 🔹 Option 1: Git clone (recommended)
+### 🔹 Option 1: Single-file release (one curl)
+
+```bash
+curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager -o nebula-manager
+curl -fsSL https://github.com/ulno/nebula-manager/releases/latest/download/nebula-manager.sha256 -o nebula-manager.sha256
+sha256sum -c nebula-manager.sha256
+chmod +x nebula-manager
+./nebula-manager            # no sudo needed
+```
+
+The release asset embeds the modules and the runtime assets (config template
+plus the client-bundle installers), so no `lib/` directory is needed. A matching
+`nebula-manager.sha256` is published next to it; updates use the same release
+asset (override with `NEBULA_MANAGER_SINGLE_URL`).
+
+### 🔹 Option 2: Git clone (recommended for development)
 
 ```bash
 git clone https://github.com/ulno/nebula-manager.git
@@ -71,7 +87,10 @@ cd nebula-manager
 ./nebula-manager            # no sudo needed
 ```
 
-### 🔹 Option 2: Download the entrypoint and modules
+Build the single-file artifact locally with `make build` (or
+`./build_single.sh`), which writes `dist/nebula-manager` and its checksum.
+
+### 🔹 Option 3: Download the entrypoint and modules
 
 ```bash
 mkdir -p nebula-manager/lib/bundle && cd nebula-manager
@@ -97,8 +116,9 @@ sudo install -m755 nebula-manager /usr/local/bin/nebula-manager
 sudo cp -a lib/. /usr/local/lib/nebula-manager/lib/
 ```
 
-The entrypoint auto-discovers `lib/` in the following order:
+The modular entrypoint auto-discovers `lib/` in the following order:
 `$NEBULA_MANAGER_LIB` → `<dir of entrypoint>/lib` → `/usr/local/lib/nebula-manager/lib` → `/usr/lib/nebula-manager/lib`.
+The single-file build installs only the script and needs none of this.
 
 ---
 

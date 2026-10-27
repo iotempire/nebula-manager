@@ -547,12 +547,19 @@ ensure_installed_to_bin_path() {
     read -p "$(show_status 'question') Do you want to install this script there? [y/N]: " install_answer
     case "$install_answer" in
         [yY][eE][sS]|[yY])
-            elevate mkdir -p "$bindir" "$libbase/lib" || { log_error "Failed to create install directories."; return 1; }
-            elevate cp "$current_script" "$target" && elevate chmod +x "$target" \
-                && log_success "Installed as $target" || log_error "Failed to install to $target"
-            if [[ -d "$current_lib" ]]; then
-                elevate cp -r "$current_lib/." "$libbase/lib/" \
-                    && log_success "Installed modules to $libbase/lib" || log_error "Failed to install modules"
+            if [[ "${NEBULA_MANAGER_SINGLE_FILE:-0}" == "1" ]]; then
+                # Single-file build: the script is the whole program.
+                elevate mkdir -p "$bindir" || { log_error "Failed to create install directory."; return 1; }
+                elevate cp "$current_script" "$target" && elevate chmod +x "$target" \
+                    && log_success "Installed as $target" || log_error "Failed to install to $target"
+            else
+                elevate mkdir -p "$bindir" "$libbase/lib" || { log_error "Failed to create install directories."; return 1; }
+                elevate cp "$current_script" "$target" && elevate chmod +x "$target" \
+                    && log_success "Installed as $target" || log_error "Failed to install to $target"
+                if [[ -d "$current_lib" ]]; then
+                    elevate cp -r "$current_lib/." "$libbase/lib/" \
+                        && log_success "Installed modules to $libbase/lib" || log_error "Failed to install modules"
+                fi
             fi
             ;;
         *) log_info "Skipped installation." ;;
@@ -1826,9 +1833,14 @@ init_remote_urls() {
     REPO_REF="$ref"
     REPO_BASE="$base"
     SERVER_CONF_URL="${base}/nebula-manager.conf"
-    SCRIPT_URL="${base}/nebula-manager"
     VERSION_URL="${base}/latest_version.txt"
     RELEASE_PAGE="https://github.com/${repo}"
+    if [[ "${NEBULA_MANAGER_SINGLE_FILE:-0}" == "1" ]]; then
+        # The single-file build is published as a release asset, not in the tree.
+        SCRIPT_URL="${NEBULA_MANAGER_SINGLE_URL:-${RELEASE_PAGE}/releases/latest/download/nebula-manager}"
+    else
+        SCRIPT_URL="${base}/nebula-manager"
+    fi
     # Key the cache by repo so a fork never reuses upstream's cached version.
     VERSION_CACHE_FILE="/tmp/nebula-manager-version-${safe}.cache"
     export REPO_SLUG REPO_REF REPO_BASE SERVER_CONF_URL SCRIPT_URL VERSION_URL RELEASE_PAGE VERSION_CACHE_FILE
@@ -1847,7 +1859,9 @@ update_available() { version_gt "$2" "$1"; }
 # work); file installs fetch the entrypoint + modules with checksum checking.
 perform_manager_update() {
     local latest="$1"
-    if [[ -n "${MANAGER_ROOT:-}" && -d "${MANAGER_ROOT}/.git" ]] && command -v git >/dev/null 2>&1; then
+    if [[ "${NEBULA_MANAGER_SINGLE_FILE:-0}" != "1" ]] \
+        && [[ -n "${MANAGER_ROOT:-}" && -d "${MANAGER_ROOT}/.git" ]] \
+        && command -v git >/dev/null 2>&1; then
         log_warn "This is a git checkout; update it from your remote to preserve local changes:"
         echo -e "    ${CYAN}git -C \"$MANAGER_ROOT\" pull --ff-only${RESET}"
         return 1
@@ -1866,6 +1880,27 @@ perform_manager_update() {
         log_info "Actual:   $actual"
         rm -rf "$tmp"
         return 1
+    fi
+
+    if [[ "${NEBULA_MANAGER_SINGLE_FILE:-0}" == "1" ]]; then
+        # The single file already contains the modules and assets.
+        local single_target="${SCRIPT_PATH:-$0}"
+        if path_requires_root "$single_target"; then
+            if ! elevate cp "$entry" "$single_target" || ! elevate chmod +x "$single_target"; then
+                log_error "Failed to install the update."
+                rm -rf "$tmp"
+                return 1
+            fi
+        else
+            if ! cp "$entry" "$single_target" || ! chmod +x "$single_target"; then
+                log_error "Failed to install the update."
+                rm -rf "$tmp"
+                return 1
+            fi
+        fi
+        rm -rf "$tmp"
+        log_success "Updated to version v$latest. Please rerun."
+        return 0
     fi
 
     mkdir -p "$tmp/lib/bundle"

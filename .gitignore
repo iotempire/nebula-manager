@@ -5,3 +5,6 @@ fleet-bundles-*/
 *-nebula-bundle.tar.gz
 .croc-*.log
 .bundle-*.log
+
+# Single-file release build (generated artifact, attach to releases)
+dist/

@@ -99,6 +99,10 @@ exact command to use instead (`git -C <dir> pull --ff-only`).
 - **File install:** it downloads the entrypoint **and** `lib/*.sh` from the
 resolved repo, verifies the entrypoint's SHA-256 against the published
 `nebula-manager.sha256`, and only uses `sudo` if the install path requires it.
+- **Single-file release:** it downloads only the release asset and its
+`.sha256`, verifies it, and replaces the running script (no `lib/` tree).
+Point a fork at its own asset with `NEBULA_MANAGER_SINGLE_URL`; the default is
+`<repo>/releases/latest/download/nebula-manager`.
 
 `NEBULA_MANAGER_DEFAULT_REPO` overrides the last-resort fallback (step 3) and is
 mainly useful for testing.

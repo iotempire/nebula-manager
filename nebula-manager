@@ -69,6 +69,10 @@ resolve_lib_dir() {
     printf '%s\n' "$MANAGER_ROOT/lib"
 }
 
+# The single-file release build (build_single.sh) replaces everything between
+# these markers with the concatenated modules. The modular checkout keeps
+# sourcing lib/*.sh below. Keep the markers on their own lines.
+# >>> BUNDLE:MODULES >>>
 MANAGER_LIB_DIR="$(resolve_lib_dir)"
 for _mod in ui pki select bench system import policy store fleet; do
     if [[ -r "$MANAGER_LIB_DIR/$_mod.sh" ]]; then
@@ -80,6 +84,7 @@ for _mod in ui pki select bench system import policy store fleet; do
     fi
 done
 unset _mod
+# <<< BUNDLE:MODULES <<<
 
 # Resolve the repo this copy came from (env override -> git origin -> upstream)
 # and derive the URLs used for config templates, version checks and updates.
@@ -405,6 +410,8 @@ Environment:
   NEBULA_MANAGER_CONF  Path to nebula-manager.conf (alias for --config)
   NEBULA_MANAGER_REPO  owner/repo to use for update checks (default: git origin)
   NEBULA_MANAGER_REF   branch to use for update checks (default: main)
+  NEBULA_MANAGER_SINGLE_URL
+                       Override the single-file release/update URL
   NEBULA_UI            UI backend override
   DEBUG                Debug levels: warn|log|info|learn|all
                         (same as --debug; learn shows notes + commands and

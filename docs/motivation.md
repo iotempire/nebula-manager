@@ -57,6 +57,7 @@ running a class exposed a different set of requirements:
 | Node configs | Per-node `<name>.yml` next to the key/cert, generated at signing time and reused by bundles. |
 | Firewall | Policy packs, group pickers, batch node firewalls with lighthouse-aware defaults, and explicit AND/OR semantics. |
 | Bundles | Self-contained Linux/macOS and Windows installers, config diffs, cert-only updates, HTTP/croc sharing one-liners. |
+| Release | `make build` emits one self-contained executable (modules + runtime assets) for one-`curl` installs and updates; the modular `lib/` tree stays canonical. |
 | Fleet | `fleet croc` for classroom mass deployment and `fleet ssh` with diff/backup/validate/restart. |
 | Adoption | `import` discovers an existing Nebula installation and proposes `nebula-manager.conf`. |
 | Teaching | [User stories](user-stories.md), [distribution guides](linux-distros.md), preview transcripts, debug/`learn` modes. |
