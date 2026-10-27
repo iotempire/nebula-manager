@@ -1,5 +1,9 @@
 # Linux distribution guides
 
+[← Back to README](../README.md) · [Documentation map](../README.md#documentation-map)
+
+---
+
 `nebula-manager` runs on any systemd-based Linux. These are the tested paths for
 the three families it auto-detects from `/etc/os-release`:
 

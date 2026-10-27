@@ -1,9 +1,13 @@
 # User stories & guiding examples
 
+[← Back to README](../README.md) · [Documentation map](../README.md#documentation-map)
+
+---
+
 These two stories are the **guiding examples** for nebula-manager's workflow. They
 describe the intended end-to-end experience and double as acceptance criteria for
 the current tool. Open or not-yet-implemented work is tracked in
-[README ▸ Roadmap / TODO](../README.md#-roadmap--todo) rather than annotated
+[Roadmap / TODO](roadmap.md#roadmap--todo) rather than annotated
 inline here.
 
 > Motivation: on a host where Nebula is **already installed and running**, the
@@ -635,7 +639,7 @@ students do **not** need to clone nebula-manager. Dana receives her signed cert 
 ### Bianca — Ubuntu (Debian and Mint work the same)
 
 Per-distribution details (Fedora/RHEL, Arch/CachyOS, SELinux, firewalls) are in
-**[docs/linux-distros.md](linux-distros.md)**.
+**[Linux distribution guides](linux-distros.md)**.
 
 Bianca only needs Nebula plus `curl`/`unzip` (or `croc`); the bundle's
 `install.sh` does the rest. Theprof shares either a croc code or an HTTP URL:
@@ -803,4 +807,4 @@ The installer:
 These stories double as acceptance criteria for the workflows above. Open items
 (profiles, macOS launchd in the TUI, pod/container support, and real
 Windows/Android/iOS confirmation) are tracked in
-[README ▸ Roadmap / TODO](../README.md#-roadmap--todo).
+[Roadmap / TODO](roadmap.md#roadmap--todo).

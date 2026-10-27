@@ -2227,7 +2227,7 @@ _firewall_count_matching_certs() {
 }
 
 _firewall_explain_direction() {
-    local config="$1" direction="$2" n i port proto host groups cidr lcidr scope matched
+    local config="$1" direction="$2" n i port proto host groups group cidr lcidr scope matched
     n="$(yq ".firewall.$direction | length" "$config" 2>/dev/null)"
     [[ "$n" =~ ^[0-9]+$ ]] || n=0
     printf '\n%s rules (%d):\n' "${direction^}" "$n"
@@ -2240,6 +2240,9 @@ _firewall_explain_direction() {
         proto="$(yq -r ".firewall.${direction}[$i].proto // \"any\"" "$config")"
         host="$(yq -r ".firewall.${direction}[$i].host  // \"\"" "$config")"
         groups="$(yq -r ".firewall.${direction}[$i].groups // [] | join(\",\")" "$config")"
+        # `group:` (singular) is the form used by batch-generated node configs.
+        group="$(yq -r ".firewall.${direction}[$i].group // \"\"" "$config")"
+        [[ -n "$group" ]] && groups="${groups:+$groups,}$group"
         cidr="$(yq -r ".firewall.${direction}[$i].cidr // \"\"" "$config")"
         lcidr="$(yq -r ".firewall.${direction}[$i].local_cidr // \"\"" "$config")"
         scope=""

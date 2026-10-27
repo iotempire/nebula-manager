@@ -152,6 +152,19 @@ assert_contains "explain: match count"      "$explain" "2 cert(s) match"
 assert_contains "explain: host any is any peer" "$explain" "any peer"
 assert_contains "explain: workspace groups" "$explain" "home"
 
+# `group:` (singular) is what batch-generated node configs use.
+cfg_singular="$SANDBOX/config-singular.yml"
+cat > "$cfg_singular" <<'YAML'
+firewall:
+  inbound:
+    - port: any
+      proto: any
+      group: home
+YAML
+singular="$(firewall_explain "$cfg_singular" 2>&1)"
+assert_contains "explain: singular group rule" "$singular" "groups [home]"
+assert_contains "explain: singular group count" "$singular" "2 cert(s) match"
+
 cfg3="$SANDBOX/config3.yml"; cp "$cfg" "$cfg3"
 firewall_add_rule "$cfg3" inbound any any "ghost" >/dev/null 2>&1
 warn="$(firewall_explain "$cfg3" 2>&1)"
