@@ -687,7 +687,7 @@ headless subcommands for scripting — see *Expert / scriptable* below.
 |---|---|
 | **Manager Setup** | shows the **detected state** (manager config, Nebula service, cert workspace), then: import/update from this host, **import a client bundle (.zip/.tar.gz)**, create, browse, edit, delete `nebula-manager.conf`, manage instances, pick the certificate workspace |
 | **Instances** | list / add / enable-disable / remove `[server.*]` entries, and start/stop the selected instance's service |
-| **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`<name>.yml` next to each cert: generate/edit/refresh), revoke, switch workspace, store backup/git |
+| **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), **firewall for nodes in bulk** (group policy, lighthouse-safe), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`<name>.yml` next to each cert: generate/edit/refresh), revoke, switch workspace, store backup/git |
 | **Fleet** | **croc mass deployment** (one code per student/node), **SSH push** of a config/firewall change, and SSH reachability probing |
 | **Instance Settings** | validate / edit Nebula `config.yml` (service-owned files are edited on a working copy and saved once with a timestamped backup), edit firewall rules with a **group picker + rule templates + explain**, **policy packs** (embed in bundles / apply / export), **name resolution (Nebula DNS)** |
 | **Connectivity** | ping every cert IP; optional `iperf3` test |
@@ -870,7 +870,7 @@ configure the lighthouse overlay IP as DNS for the Nebula interface manually.
 ### Firewall for groups
 
 Nebula firewalls are **per host**, and rule `groups:` refer to the **peer's
-certificate groups**. nebula-manager therefore provides three layers:
+certificate groups**. nebula-manager therefore provides four layers:
 
 **1. Edit this host's rules with a group picker.**
 **Instance Settings ▸ Edit Firewall ▸ Inbound/Outbound rules ▸ add/edit** opens a
@@ -919,6 +919,45 @@ asks for confirmation; declining leaves the config untouched. Validation
 nebula-manager firewall explain [--nebula-config FILE] [--cert-dir DIR]
 nebula-manager firewall groups  [--cert-dir DIR]
 ```
+
+**4. Change many node configs at once.**
+**Certificates ▸ Firewall for Nodes (Batch)…** applies one firewall to the
+stored per-node configs of a selection. Lighthouses are **skipped by default**
+(they must accept connections from everyone); add `--include-lighthouse` when
+you really mean them.
+
+```bash
+# Every node except the lighthouse: accept inbound only from group 'ulno'.
+./nebula-manager cert firewall --from-group ulno --select all --yes
+
+# Preview only:
+./nebula-manager cert firewall --from-group ulno --select all --dry-run
+
+# Students only, permissive, from a policy pack:
+./nebula-manager cert firewall --firewall permissive --select group:students --yes
+./nebula-manager cert firewall --policy home --select group:home --yes
+```
+
+The generated rule is the Nebula equivalent of “only these peers may connect
+in”, while outbound stays open:
+
+```yaml
+firewall:
+  inbound:
+    - port: any
+      proto: any
+      group: "ulno"     # or groups: ["ulno", "admin"]
+  outbound:
+    - port: any
+      proto: any
+      host: any
+```
+
+`--from-group` also creates (or reuses) a policy pack named `group-ulno` under
+`~/.config/nebula-manager/policies/`, and remembers it per certificate, so
+bundles and later regenerations keep the same policy. Existing hand edits are
+snapshotted (git or `backups/`) before `--force` regeneration. Use
+`--select`/`--exclude` (same grammar as group batch) to narrow the target set.
 
 ### Policy packs (fleet)
 
@@ -1364,6 +1403,7 @@ What it covers:
 | `tests/test_node_config.sh` | per-node `<name>.yml` next to the cert: signing writes it, detected network settings/firewall embedded, hand edits survive, `--force` refreshes, bundle reuses it, explicit policy overrides, legacy `configs/` auto-migration, mobile skipped, CLI list/show/path/generate, no sudo |
 | `tests/test_rename_group.sh` | group migration: preview/scan, dedup + order, re-sign preserves name/IP/expiry, unaffected certs/keys byte-identical, `*.crt.bak`, no sudo, CLI `--yes`/non-tty refusal |
 | `tests/test_group_batch.sh` | selector grammar (`group`/`without`/`name` glob/`ip` CIDR/`cert`/union/exclude) + batch add/remove/move/set/prune, idempotency, `--dry-run`, non-tty refusal, `group list`, plain checklist parsing |
+| `tests/test_firewall_batch.sh` | batch node firewall: `--from-group` rule, lighthouse skipped by default/`--include-lighthouse`, auto policy pack + remembered choice, real YAML assertions, bundle reuse, permissive/`--policy`, `--dry-run`, non-tty refusal, no sudo |
 | `tests/test_firewall_groups.sh` | firewall group discovery/counts, picker (defaults/manual/unknown groups), rule templates, editor picker wiring, explain (defaults/matches/typo warning), diff + save prompt, CLI |
 | `tests/test_policy_packs.sh` | policy packs: create/list/show/validate, group-based suggestions, embedding in generated configs/bundles (CLI + TUI), per-host export, apply (working copy + `--yes`), delete, no sudo |
 | `tests/test_store_history.sh` | store action log; datestamped backups before overwrite/group/CA/remove; git snapshots with keys/backups excluded; CLI `cert store status/log/backup/git-init`; no sudo |
@@ -1426,16 +1466,17 @@ Create/sign/revoke certificates; manage the CA, groups and the certificate works
     4. 🔄 Re-sign All Certificates
     5. 📝 Rename Group in Certificates
     6. 📝 Edit Groups (Batch)…
-    7. 🔍 View Certificate and Key Details
-    8. ⏳ Certificate Expiry
-    9. 📤 Bundle / Export Client Certificate
-    10. 📝 Node Client Configs
-    11. ⛔ Revoke Certificate
-    12. 🗝️ Switch Certificate Workspace
-    13. 💾 Store Backup / Git
-    14. ❌ Remove Certificate
-    15. ↩️ Go Back
-    [?] Choose an option [1-15, Enter=Back, /=search, ?=help]:
+    7. 🔐 Firewall for Nodes (Batch)…
+    8. 🔍 View Certificate and Key Details
+    9. ⏳ Certificate Expiry
+    10. 📤 Bundle / Export Client Certificate
+    11. 📝 Node Client Configs
+    12. ⛔ Revoke Certificate
+    13. 🗝️ Switch Certificate Workspace
+    14. 💾 Store Backup / Git
+    15. ❌ Remove Certificate
+    16. ↩️ Go Back
+    [?] Choose an option [1-16, Enter=Back, /=search, ?=help]:
 ```
 
 **Certificate list** — `nebula-manager cert list` (plain CSV, never truncated)

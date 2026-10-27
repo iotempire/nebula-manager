@@ -34,7 +34,7 @@ Start the tool and everything is selectable from the text-graphical menus:
 |---|---|
 | **Manager Setup** | shows the detected state, then Import/Update / **Import client bundle** / Create / Browse / Edit / Delete config, Manage instances, Certificate Workspace |
 | **Instances** | List / Add / Enable-Disable / Remove `[server.*]`, start/stop the service |
-| **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / View / Expiry / **per-node client configs** (`<name>.yml` next to each cert) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
+| **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / **Firewall for nodes (batch)** / View / Expiry / **per-node client configs** (`<name>.yml` next to each cert) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
 | **Fleet** | **croc mass deployment** (one code per student) / **SSH push** of a config or firewall / SSH reachability probe |
 | **Instance Settings** | Validate / Edit Nebula `config.yml` / Firewall / Name resolution |
 | **Connectivity** | ping all cert IPs (+ optional `iperf3`) |
@@ -487,6 +487,23 @@ $ nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 
 Student groups later reuse the same mechanism: a `students` pack with
 `groups: [students]` and per-group rules, embedded into every student bundle.
+
+**Locking down a fleet in one step.** When he wants every machine except the
+lighthouse to accept inbound connections only from his own nodes (group
+`ulno`), he does not edit five files by hand:
+
+```bash
+# TUI: Certificates ▸ Firewall for Nodes (Batch)…
+#       select all, choose “Inbound only from a group”, enter: ulno
+
+./nebula-manager cert firewall --from-group ulno --select all --yes
+```
+
+Lighthouses (`vps.theprof.mesh`) are skipped automatically, every selected
+`<name>.yml` gets the `group: "ulno"` inbound rule while outbound stays open,
+and the choice is remembered per certificate. A reusable pack `group-ulno` is
+created, so future bundles and `--force` regenerations keep the same policy.
+`--dry-run` previews it; `--include-lighthouse` overrides the skip.
 
 ### Phase 2e — Hand out the class bundles, one code per student
 

@@ -2005,6 +2005,247 @@ pki_node_config_menu_tui() {
     done
 }
 
+# Apply a firewall to the certificates selected by cert_select (SEL_*).
+#   cert_dir      workspace
+#   mode          host | skip | permissive | default | pack
+#   pack          policy pack name (for mode=pack)
+#   policy        policy file path (empty = detected host firewall)
+#   desc          human description for the preview
+#   include_lh    1 to also change lighthouse certificates
+#   dry           1 to only print the plan
+# Returns 0 when every write succeeded (or on a dry run).
+pki_firewall_apply_selected() {
+    local cert_dir="$1" mode="$2" pack="${3:-}" policy="${4:-}" desc="${5:-}"
+    local include_lh="${6:-0}" dry="${7:-0}"
+    local i name changed=0 failed=0 skipped=0 changed_names=()
+    for i in "${!SEL_NAMES[@]}"; do
+        name="${SEL_NAMES[i]}"
+        [[ -n "$name" ]] || continue
+        if (( ! include_lh )) && pki_cert_is_lighthouse "$name" "$cert_dir"; then
+            log_info "Skipping lighthouse: $name (use --include-lighthouse to change it)"
+            skipped=$((skipped + 1))
+            continue
+        fi
+        if (( dry )); then
+            printf '  %-34s %-18s [%s] -> %s\n' \
+                "$name" "${SEL_IPS[i]:-N/A}" "${SEL_GROUPS[i]//,/:}" "$desc"
+            changed=$((changed + 1))
+            continue
+        fi
+        if [[ "$mode" == "skip" ]]; then
+            node_fw_set "$name" skip "" 2>/dev/null || true
+        else
+            node_fw_set "$name" "$mode" "$pack" 2>/dev/null || true
+        fi
+        if pki_node_config_write "$name" "$cert_dir" "$policy" 1 >/dev/null; then
+            log_success "Firewall for $name: $desc"
+            changed=$((changed + 1))
+            changed_names+=("$name")
+        else
+            log_error "Could not update the config for $name"
+            failed=$((failed + 1))
+        fi
+    done
+    if (( dry )); then
+        (( changed )) || log_warn "No certificate would be changed."
+        (( skipped )) && log_info "$skipped lighthouse certificate(s) skipped."
+        return 0
+    fi
+    if (( skipped )); then
+        log_info "Skipped $skipped lighthouse certificate(s)."
+    fi
+    log_info "Firewall updated for $changed certificate(s); $failed failed."
+    (( failed == 0 ))
+}
+
+# Headless: nebula-manager cert firewall --from-group ulno [--select ...]
+pki_firewall_cli() {
+    local cert_dir="" mode="" policy_ref="" group_csv="" policy="" pack="" desc="" tmp=""
+    local dry=0 yes=0 include_lh=0
+    local -a selects=() excludes=()
+    while (( $# )); do
+        case "$1" in
+            --cert-dir)   shift; cert_dir="${1:-}" ;;
+            --cert-dir=*) cert_dir="${1#*=}" ;;
+            --select)     shift; selects+=("${1:-}") ;;
+            --select=*)   selects+=("${1#*=}") ;;
+            --exclude)    shift; excludes+=("${1:-}") ;;
+            --exclude=*)  excludes+=("${1#*=}") ;;
+            --policy|-P)  shift; policy_ref="${1:-}" ;;
+            --policy=*)   policy_ref="${1#*=}" ;;
+            --firewall|--mode) shift; mode="${1:-}" ;;
+            --firewall=*) mode="${1#*=}" ;;
+            --mode=*)     mode="${1#*=}" ;;
+            --from-group|--group) shift; group_csv="${1:-}" ;;
+            --from-group=*) group_csv="${1#*=}" ;;
+            --include-lighthouse|--with-lighthouse) include_lh=1 ;;
+            --dry-run|-n) dry=1 ;;
+            --yes|-y)     yes=1 ;;
+            -h|--help)
+                cat >&2 <<'EOF'
+Usage: nebula-manager cert firewall <choice> [--select SPEC]... [--exclude SPEC]...
+
+Change the firewall in the stored per-node configs (configs are regenerated).
+Lighthouses are skipped by default; add --include-lighthouse to change them.
+
+Firewall choice (pick one):
+  --from-group G[,G2]   allow inbound only from these certificate group(s)
+  --policy NAME         embed an existing policy pack
+  --firewall MODE       host | permissive | default | skip | pack:NAME
+
+Selection (default: all certificates):
+  --select SPEC         group:G, without:G, name:GLOB, ip:CIDR, cert:NAME, all
+  --exclude SPEC        subtract from the selection
+
+Options:
+  --cert-dir DIR        Certificate workspace
+  --include-lighthouse  also change certificates in the lighthouse role
+  --dry-run, -n         show what would change; write nothing
+  --yes, -y             do not ask (required when stdin is not a TTY)
+
+Example:
+  nebula-manager cert firewall --from-group ulno --select all --yes
+    # every node except the lighthouse accepts inbound only from group 'ulno'
+EOF
+                return 0 ;;
+            -*) log_error "Unknown option for 'cert firewall': $1"; return 2 ;;
+            *)  log_error "Unexpected argument for 'cert firewall': $1"; return 2 ;;
+        esac
+        shift
+    done
+    cert_dir="${cert_dir:-$(resolve_cert_dir)}"
+
+    local choices=0
+    [[ -n "$mode" ]] && choices=$((choices + 1))
+    [[ -n "$policy_ref" ]] && choices=$((choices + 1))
+    [[ -n "$group_csv" ]] && choices=$((choices + 1))
+    if (( choices != 1 )); then
+        log_error "Choose exactly one of --from-group, --policy or --firewall (see --help)."
+        return 2
+    fi
+
+    if [[ -n "$group_csv" ]]; then
+        if declare -F _pki_groups_validate_list >/dev/null && ! _pki_groups_validate_list "$group_csv"; then
+            log_error "Invalid group list: '$group_csv'"
+            return 2
+        fi
+        local pack_path
+        pack_path="$(node_fw_group_policy_pack "$group_csv")" || return 1
+        policy="$pack_path"
+        pack="$(basename "$policy" .yml)"
+        mode="pack"
+        desc="inbound only from group(s) ${group_csv}"
+    elif [[ -n "$policy_ref" ]]; then
+        policy="$(policy_resolve "$policy_ref")" || return 1
+        pack="$(basename "$policy" .yml)"
+        mode="pack"
+        desc="policy pack ${pack}"
+    else
+        case "$mode" in
+            host)       desc="copy this host's firewall (detected)" ;;
+            skip)       desc="forget the saved choice (detected firewall in the config)" ;;
+            permissive) desc="permissive: allow all inbound/outbound" ;;
+            default)    desc="Nebula defaults: outbound allow, inbound drop" ;;
+            pack:*)
+                pack="${mode#pack:}"
+                policy="$(policy_resolve "$pack")" || return 1
+                mode="pack"
+                desc="policy pack ${pack}" ;;
+            *)
+                log_error "Unknown --firewall mode: '$mode' (host|permissive|default|skip|pack:NAME)"
+                return 2 ;;
+        esac
+        case "$mode" in
+            permissive|default)
+                policy="$(node_fw_render_policy "$mode")" || return 1
+                tmp="$policy" ;;
+        esac
+    fi
+
+    local -a selargs=()
+    local s
+    for s in "${selects[@]}"; do selargs+=(--select "$s"); done
+    for s in "${excludes[@]}"; do selargs+=(--exclude "$s"); done
+    if ! cert_select "$cert_dir" "${selargs[@]}"; then
+        log_warn "No certificate matched the selection in $cert_dir."
+        [[ -n "$tmp" ]] && rm -f "$tmp"
+        return 1
+    fi
+
+    echo
+    echo "Firewall for ${#SEL_NAMES[@]} selected certificate(s) in $cert_dir:"
+    echo "  Change: $desc"
+    pki_firewall_apply_selected "$cert_dir" "$mode" "$pack" "$policy" "$desc" "$include_lh" 1
+    echo
+
+    if (( dry )); then
+        log_info "Dry run: no config was changed."
+        [[ -n "$tmp" ]] && rm -f "$tmp"
+        return 0
+    fi
+    if (( ! yes )); then
+        if [[ ! -t 0 ]]; then
+            log_error "Refusing to change firewalls without --yes on a non-interactive shell."
+            [[ -n "$tmp" ]] && rm -f "$tmp"
+            return 2
+        fi
+        local ans=""
+        read -rp "$(show_status 'question') Apply this firewall? [y/N]: " ans || { [[ -n "$tmp" ]] && rm -f "$tmp"; return 1; }
+        if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
+            log_info "Canceled."
+            [[ -n "$tmp" ]] && rm -f "$tmp"
+            return 0
+        fi
+    fi
+
+    pki_firewall_apply_selected "$cert_dir" "$mode" "$pack" "$policy" "$desc" "$include_lh" 0
+    local rc=$?
+    [[ -n "$tmp" ]] && rm -f "$tmp"
+    return $rc
+}
+
+# TUI: choose a selection, then apply a firewall to the stored node configs.
+pki_firewall_batch_tui() {
+    local cert_dir; cert_dir="$(resolve_cert_dir)"
+    ensure_cert_dir >/dev/null || return 1
+    cert_select_tui "$cert_dir" || return 0
+    (( ${#SEL_NAMES[@]} )) || return 0
+
+    local -a pairs=( host "Copy this host's firewall (detected)"
+                     permissive "Permissive: allow all inbound/outbound"
+                     default "Nebula defaults: outbound allow, inbound drop"
+                     group "Inbound only from a group (e.g. ulno)"
+                     skip "Forget the saved choice (detected firewall)" )
+    if declare -F policy_pairs >/dev/null && policy_pairs; then
+        local i
+        for (( i=0; i<${#POLICY_PAIRS[@]}; i+=2 )); do
+            pairs+=( "pack:${POLICY_PAIRS[i]}" "Policy pack: ${POLICY_PAIRS[i+1]}" )
+        done
+    fi
+
+    local choice
+    choice="$(ui_menu "Firewall for nodes" \
+        "Apply to ${#SEL_NAMES[@]} selected certificate(s). Lighthouses are skipped unless you include them." \
+        "${pairs[@]}")" || return 0
+    [[ -n "$choice" ]] || return 0
+
+    local -a args=( --cert-dir "$cert_dir" )
+    local n
+    for n in "${SEL_NAMES[@]}"; do args+=( --select "cert:$n" ); done
+    case "$choice" in
+        pack:*) args+=( --policy "${choice#pack:}" ) ;;
+        group)
+            local gs avail
+            avail="$(cert_group_summary "$cert_dir" 2>/dev/null || true)"
+            read -rp "$(show_status 'question') Allow inbound only from group(s)${avail:+ (existing: $avail)}: " gs || return 0
+            [[ -n "$gs" ]] || return 0
+            args+=( --from-group "$gs" )
+            ;;
+        *) args+=( --firewall "$choice" ) ;;
+    esac
+    pki_firewall_cli "${args[@]}"
+}
+
 # Default place to write exported client bundles. In order of preference:
 #   $NEBULA_BUNDLE_DIR -> the directory nebula-manager was started in ->
 #   ~/Downloads -> ~/tmp -> $HOME -> $TMPDIR
@@ -3262,6 +3503,7 @@ manage_nebula_certs() {
         "$(get_icon 'refresh')Re-sign All Certificates"
         "$(get_icon 'edit')Rename Group in Certificates"
         "$(get_icon 'edit')Edit Groups (Batch)…"
+        "$(get_icon 'security')Firewall for Nodes (Batch)…"
         "$(get_icon 'inspect')View Certificate and Key Details"
         "$(get_icon 'hour-glass')Certificate Expiry"
         "$(get_icon 'upload')Bundle / Export Client Certificate"
@@ -3278,6 +3520,7 @@ manage_nebula_certs() {
         "pki_resign_all_tui"
         "pki_rename_group_tui"
         "pki_group_edit_tui"
+        "pki_firewall_batch_tui"
         "view_cert_details"
         "list_certs_expiry"
         "pki_bundle_client_menu"
@@ -3589,6 +3832,9 @@ pki_cli() {
             ;;
         config|node-config|node_config|configs)
             pki_node_config_cli "$@"
+            ;;
+        firewall|fw)
+            pki_firewall_cli "$@"
             ;;
         resign-all|renew-all|resignall)
             local rcert="" rdry=0 ryes=0 rkeep=0 rskip=0

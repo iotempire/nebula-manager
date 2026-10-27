@@ -874,6 +874,7 @@ Certificates ▸ Generate Client Certificate|sign create node machine client cer
 Certificates ▸ Re-sign All Certificates|renew resign all certificates new ca rotation keys|pki_resign_all_tui
 Certificates ▸ Rename Group|rename group cert certificate|pki_rename_group_tui
 Certificates ▸ Edit Groups (Batch)|groups batch add remove move set rename certificates|pki_group_edit_tui
+Certificates ▸ Firewall for Nodes (Batch)|firewall batch group policy pack inbound allow nodes certificates|pki_firewall_batch_tui
 Certificates ▸ View Certificate Details|view details inspect show cert certificate|view_cert_details
 Certificates ▸ Certificate Expiry|expiry expiration renew cert certificate|list_certs_expiry
 Certificates ▸ Bundle / Export Client|bundle export zip client certificate|pki_bundle_client_menu
