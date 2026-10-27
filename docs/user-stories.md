@@ -199,14 +199,16 @@ Nebula config (or from the `[server.*]` entries + certificates): real
 policy. Anything that cannot be determined is flagged in the file and as a
 warning instead of being silently left as a placeholder. He edits the stored
 config once (*Certificates ▸ Node Client Configs ▸ Edit*) so home machines can
-talk to each other without restrictions, and every future bundle reuses it:
+talk to each other during the bootstrap, and every future bundle reuses it:
 
 ```yaml
 firewall:
+  # Bootstrap: allow everything while the class gets connected.
+  # Phase 2d tightens this to "only group home may connect in".
   inbound:
     - port: any
       proto: any
-      group: laptops          # laptops talk to laptops
+      host: any
   outbound:
     - port: any
       proto: any
@@ -433,7 +435,7 @@ before the change: a datestamped `backups/<timestamp>-<seq>-<reason>/` folder
 (private keys are never committed). *Certificates ▸ Store Backup / Git* or
 `nebula-manager cert store status|log|backup|git-init` shows and manages this.
 
-### Phase 2d — One firewall policy for all home machines
+### Phase 2d — Firewalls: permissive bootstrap → selective policy
 
 theprof has tuned the framework's firewall and now wants **the same rules on
 every `home` machine**, including the ones already installed. He saves that
@@ -488,22 +490,95 @@ $ nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 Student groups later reuse the same mechanism: a `students` pack with
 `groups: [students]` and per-group rules, embedded into every student bundle.
 
-**Locking down a fleet in one step.** When he wants every machine except the
-lighthouse to accept inbound connections only from his own nodes (group
-`ulno`), he does not edit five files by hand:
+**From permissive to selective.** The pack above is the fine-grained route (it
+can carry ports, ICMP rules, `local_cidr`, …). For the simple “only my own
+machines may connect in” case, the batch command below updates every existing
+node config at once. Phase 2 started with a permissive bootstrap firewall
+(`inbound: any`, `outbound: any`) so the class could test immediately; that also
+means any student certificate can reach any of theprof's home machines. Once the
+mesh works, he tightens it: his own machines (group `home` after Phase 2c) get
+full inbound access, everyone else is dropped for normal overlay traffic, and
+the lighthouse keeps doing its job.
 
 ```bash
-# TUI: Certificates ▸ Firewall for Nodes (Batch)…
-#       select all, choose “Inbound only from a group”, enter: ulno
+# Preview the change (no files touched):
+$ nebula-manager cert firewall --from-group home --select all --dry-run
+Firewall for 5 selected certificate(s) in ~/keys/nebula:
+  Change: inbound only from group(s) home
+  theprof-framework.theprof.mesh  ... -> inbound only from group(s) home
+  theprof-ge75.theprof.mesh       ... -> inbound only from group(s) home
+  ...
+  Skipping lighthouse: vps.theprof.mesh
 
-./nebula-manager cert firewall --from-group ulno --select all --yes
+# Apply:
+$ nebula-manager cert firewall --from-group home --select all --yes
+...
+[✔] Firewall for theprof-framework.theprof.mesh: inbound only from group(s) home
+[✔] Firewall for theprof-ge75.theprof.mesh: inbound only from group(s) home
+...
+[-] Firewall updated for 4 certificate(s); 0 failed.
 ```
 
-Lighthouses (`vps.theprof.mesh`) are skipped automatically, every selected
-`<name>.yml` gets the `group: "ulno"` inbound rule while outbound stays open,
-and the choice is remembered per certificate. A reusable pack `group-ulno` is
-created, so future bundles and `--force` regenerations keep the same policy.
-`--dry-run` previews it; `--include-lighthouse` overrides the skip.
+**TUI:** *Certificates ▸ Firewall for Nodes (Batch)…* → select the nodes →
+*Inbound only from a group* → `home`.
+
+Each selected `<name>.yml` now contains:
+
+```yaml
+firewall:
+  inbound:
+    - port: any
+      proto: any
+      group: "home"
+  outbound:
+    - port: any
+      proto: any
+      host: any
+```
+
+Unmatched inbound is dropped (Nebula's default `inbound_action: drop`);
+outbound stays open. Lighthouses are skipped automatically: discovery/relay is
+Nebula protocol traffic and is **not** filtered by the Nebula `firewall:`
+section, and the VPS's **host** firewall still allows the public UDP port
+(`4545`).
+
+A reusable pack `group-home` is created and the choice is remembered per
+certificate, so later bundles and `--force` regenerations keep the same policy.
+The old configs are snapshotted first (git commit or `backups/`), and
+`--firewall permissive` is the one-command rollback.
+
+**The lighthouse is the one config he edits by hand** (or edits in
+`vps.theprof.mesh.yml` before deploying), because it intentionally has a
+different policy:
+
+```yaml
+firewall:
+  inbound:
+    - port: any
+      proto: any
+      group: "home"      # full access for theprof's machines
+    - port: any
+      proto: icmp
+      host: any          # optional: everyone may ping for diagnostics
+  outbound:
+    - port: any
+      proto: any
+      host: any
+```
+
+If students should reach a service on the lighthouse (SSH, DNS, …), add an
+explicit rule for it; a broad `host: any` under `inbound` would re-open the
+whole host. Several groups? Use **one rule per group**: Nebula AND-s a
+`groups:` list (a peer would need all of them), while
+`--from-group home,students` emits one `group:` rule each.
+
+**Deploy and verify.** Push the refreshed configs with
+`fleet ssh NODE --config <node>.yml`, a bundle + installer, or copy them and
+restart `nebula.service`. `nebula-manager firewall explain --nebula-config …`
+shows the effective policy; a `ping` from a `home` node now works, while a
+`students` node is dropped for normal data traffic but can still negotiate
+through the lighthouse. Student nodes keep their own policy — if they should
+only talk to each other, apply `--from-group students` to their configs.
 
 ### Phase 2e — Hand out the class bundles, one code per student
 
@@ -711,6 +786,7 @@ The installer:
 | Mobile certs (`--in-pub`, `--qr`) |
 | **Batch group editing** (add/remove/move/set/rename/prune with a selector) |
 | **Firewall group picker + rule templates + `firewall explain`** (this host) |
+| **Batch node firewalls** (`cert firewall --from-group …`, lighthouse-safe, per-node configs) |
 | **Policy packs** (create, embed in bundles, apply here, export per host) |
 | **Store history** (action log, datestamped backups, optional git snapshots) |
 | Unprivileged cert workspace (`--cert-dir` / `NEBULA_KEYS_DIR` / auto-detect) |
