@@ -34,4 +34,49 @@ mkdir -p "$NEBULA_DIR/certs"
 if nebula_keys_known; then _ok "legacy server certs -> known"; else _bad "legacy server certs -> known"; fi
 unset NEBULA_DIR
 
+# --- [global] cert_dir in the manager config is honoured --------------------
+conf="$SANDBOX/manager.conf"
+mkdir -p "$SANDBOX/from-conf"
+cat > "$conf" <<EOF
+[global]
+bin_path=/usr/bin
+cert_dir=$SANDBOX/from-conf
+
+[server.default]
+dir=/etc/nebula
+enabled=true
+EOF
+export CONF_OVERRIDE="$conf"
+assert_eq "manager conf cert_dir is used" "$(resolve_cert_dir)" "$SANDBOX/from-conf"
+if nebula_keys_known; then _ok "manager conf cert_dir -> known"; else _bad "manager conf cert_dir -> known"; fi
+
+# A stale saved workspace must not shadow a populated manager-config store.
+: > "$SANDBOX/from-conf/node.crt"
+save_cert_dir_selection "$SANDBOX/stale-empty-keys"
+assert_eq "stale empty selection falls back to manager conf" \
+    "$(resolve_cert_dir)" "$SANDBOX/from-conf"
+# A populated saved workspace still wins over the manager config.
+mkdir -p "$SANDBOX/saved-populated"
+: > "$SANDBOX/saved-populated/node.crt"
+save_cert_dir_selection "$SANDBOX/saved-populated"
+assert_eq "populated saved selection beats manager conf" \
+    "$(resolve_cert_dir)" "$SANDBOX/saved-populated"
+rm -f "$(nebula_keys_state_file)"
+
+# Explicit sources still win over the saved manager config.
+export NEBULA_KEYS_DIR="$SANDBOX/env-keys"
+assert_eq "NEBULA_KEYS_DIR beats manager conf" "$(resolve_cert_dir)" "$SANDBOX/env-keys"
+unset NEBULA_KEYS_DIR
+export CERT_DIR_OVERRIDE="$SANDBOX/flag-keys"
+assert_eq "--cert-dir beats manager conf" "$(resolve_cert_dir)" "$SANDBOX/flag-keys"
+unset CERT_DIR_OVERRIDE
+
+# Tilde is expanded in the manager config.
+cat > "$conf" <<EOF
+[global]
+cert_dir=~/keys-from-conf
+EOF
+assert_eq "tilde in manager conf is expanded" "$(resolve_cert_dir)" "$HOME/keys-from-conf"
+unset CONF_OVERRIDE
+
 harness_summary

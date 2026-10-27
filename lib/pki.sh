@@ -101,6 +101,37 @@ cert_groups_prompt() {
     printf '%s' "$prompt"
 }
 
+# _manager_conf_cert_dir : [global] cert_dir from nebula-manager.conf, if set.
+# Read-only and never elevated: a service-owned manager config simply yields
+# nothing and the normal fallbacks apply.
+_manager_conf_cert_dir() {
+    declare -F resolve_server_conf >/dev/null || return 0
+    local conf d
+    conf="$(resolve_server_conf 2>/dev/null)" || return 0
+    [[ -n "$conf" && -f "$conf" && -r "$conf" ]] || return 0
+    d="$(awk '
+        { sub(/\r$/, "") }
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*\[/ { insec = ($0 ~ /^[[:space:]]*\[global\][[:space:]]*$/); next }
+        insec && /^[[:space:]]*cert_dir[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit
+        }
+    ' "$conf" 2>/dev/null)"
+    [[ -n "$d" ]] || return 0
+    d="${d/#\~/$HOME}"
+    printf '%s\n' "$d"
+}
+
+# Does a workspace actually contain certificates?
+_cert_dir_has_certs() {
+    local d="${1:-}" f
+    [[ -n "$d" && -d "$d" ]] || return 1
+    for f in "$d"/*.crt; do
+        [[ -f "$f" ]] && return 0
+    done
+    return 1
+}
+
 # resolve_cert_dir : print the active certificate workspace directory.
 resolve_cert_dir() {
     if [[ -n "${CERT_DIR_OVERRIDE:-}" ]]; then
@@ -117,8 +148,24 @@ resolve_cert_dir() {
     fi
     local saved; saved="$(load_cert_dir_selection)"
     if [[ -n "$saved" ]]; then
+        # A stale saved workspace (empty/nonexistent) must not shadow a populated
+        # [global] cert_dir from nebula-manager.conf. Explicit selection is still
+        # honoured when it contains certificates.
+        local conf_dir; conf_dir="$(_manager_conf_cert_dir)"
+        if [[ -n "$conf_dir" && "$conf_dir" != "$saved" ]] \
+            && ! _cert_dir_has_certs "$saved" && _cert_dir_has_certs "$conf_dir"; then
+            debug_info "cert-dir: ignoring empty saved workspace $saved -> manager config $conf_dir"
+            # Re-sync the selection so the stale value does not come back.
+            save_cert_dir_selection "$conf_dir" 2>/dev/null || true
+            printf '%s\n' "$conf_dir"; return 0
+        fi
         debug_info "cert-dir: saved workspace -> $saved"
         printf '%s\n' "$saved"; return 0
+    fi
+    local conf_dir; conf_dir="$(_manager_conf_cert_dir)"
+    if [[ -n "$conf_dir" ]]; then
+        debug_info "cert-dir: manager config -> $conf_dir"
+        printf '%s\n' "$conf_dir"; return 0
     fi
     if [[ -n "${NEBULA_DIR:-}" ]]; then
         debug_info "cert-dir: legacy server dir -> ${NEBULA_DIR}/${NEBULA_CERT_FOLDER:-certs}"
@@ -143,6 +190,7 @@ workspace_candidates() {
     for c in \
         "${NEBULA_KEYS_DIR:-}" \
         "${CERT_DIR_OVERRIDE:-}" \
+        "$(_manager_conf_cert_dir)" \
         "${HOME:-}/keys/nebula" \
         "$(nebula_keys_default_dir)" \
         "${NEBULA_DIR:-}${NEBULA_DIR:+/${NEBULA_CERT_FOLDER:-certs}}"
@@ -152,12 +200,14 @@ workspace_candidates() {
 }
 
 # Is a certificate workspace already determined (so we should NOT prompt)?
-# An explicit --cert-dir / NEBULA_KEYS_DIR, a saved selection, or a populated
-# legacy server cert dir all count as "known".
+# An explicit --cert-dir / NEBULA_KEYS_DIR, a saved selection, [global] cert_dir
+# from nebula-manager.conf, or a populated legacy server cert dir all count.
 nebula_keys_known() {
     [[ -n "${CERT_DIR_OVERRIDE:-}" ]] && return 0
     [[ -n "${NEBULA_KEYS_DIR:-}" ]] && return 0
     [[ -n "$(load_cert_dir_selection)" ]] && return 0
+    local conf_dir; conf_dir="$(_manager_conf_cert_dir)"
+    [[ -n "$conf_dir" ]] && return 0
     if [[ -n "${NEBULA_DIR:-}" ]]; then
         local legacy="${NEBULA_DIR}/${NEBULA_CERT_FOLDER:-certs}"
         [[ -d "$legacy" ]] && ls "$legacy"/*.crt >/dev/null 2>&1 && return 0
@@ -1457,8 +1507,13 @@ pki_detect_network_config() {
 
     # 1) Local Nebula config (read-only; may use cached sudo or ask once).
     local cand r src="" cfg=""
+    local -A _pki_seen_cfg=()
     while IFS= read -r cand; do
         [[ -n "$cand" && -f "$cand" ]] || continue
+        # The same path can appear via NEBULA_DIR and a [server.*] dir; never
+        # ask for the same privileged read twice.
+        [[ -n "${_pki_seen_cfg[$cand]:-}" ]] && continue
+        _pki_seen_cfg[$cand]=1
         r="$(readable_nebula_config "$cand")" || r=""
         if [[ -n "$r" ]]; then cfg="$r"; src="$cand"; break; fi
     done < <(_pki_local_config_candidates)
@@ -1867,15 +1922,27 @@ pki_node_config_list() {
 # client config and are skipped by pki_bundle_candidates).
 pki_node_config_refresh_all() {
     local cert_dir="${1:-$(resolve_cert_dir)}" force="${2:-0}"
-    local name ips groups ok=0 failed=0
-    while IFS=$'\t' read -r name ips groups; do
+    [[ -d "$cert_dir" ]] || { log_error "Certificate directory not found: $cert_dir"; return 1; }
+    local name ips groups ok=0 failed=0 row
+    local -a rows=()
+    # Do not loop with `< <(...)`: that replaces stdin, which would hide the
+    # interactive sudo prompt for a service-owned Nebula config.
+    mapfile -t rows < <(pki_bundle_candidates "$cert_dir")
+    for row in "${rows[@]}"; do
+        [[ -n "$row" ]] || continue
+        IFS=$'\t' read -r name ips groups <<<"$row"
         [[ -n "$name" ]] || continue
         if pki_node_config_write_for_fw "$name" "$cert_dir" "$force"; then
             ok=$((ok + 1))
         else
             failed=$((failed + 1))
         fi
-    done < <(pki_bundle_candidates "$cert_dir")
+    done
+    if (( ok == 0 && failed == 0 )); then
+        log_warn "No certificates with a local private key in $cert_dir"
+        log_info "Check the workspace: use --cert-dir DIR, set NEBULA_KEYS_DIR, or select it under Certificates > Switch Certificate Workspace."
+        return 1
+    fi
     log_info "Node configs: $ok ready, $failed failed."
     (( failed == 0 ))
 }

@@ -821,11 +821,18 @@ read_nebula_config() {
     fi
     # Unreadable and no cached credentials: ask before prompting for a password
     # (skipped when NEBULA_NO_PROMPT=1, e.g. during menu-state detection).
-    # Check stderr, not stdout: readable_nebula_config redirects stdout to a
-    # capture file, which used to make this prompt impossible to reach.
-    if [[ "${NEBULA_NO_PROMPT:-0}" != 1 && -t 0 && -t 2 ]] && command -v sudo >/dev/null 2>&1; then
+    # Use /dev/tty when stdin is redirected (some callers loop over a process
+    # substitution), so the prompt is still reachable.
+    if [[ "${NEBULA_NO_PROMPT:-0}" != 1 ]] && command -v sudo >/dev/null 2>&1 \
+        && { [[ -t 2 ]] || [[ -r /dev/tty ]]; }; then
         local a
-        read -rp "$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: " a
+        if [[ -t 0 ]]; then
+            read -rp "$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: " a
+        elif [[ -r /dev/tty ]]; then
+            read -rp "$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: " a < /dev/tty
+        else
+            return 1
+        fi
         [[ "$a" =~ ^[Yy] ]] && { elevate_why "read the Nebula service config $config_file" cat "$config_file" && return 0; }
     fi
     return 1
