@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Test: per-node client configs stored in the certificate workspace.
-#   * signing a certificate writes <cert-dir>/configs/<name>.yml (user-owned)
+#   * signing a certificate writes <cert-dir>/<name>.yml (user-owned)
+#   * legacy configs/<name>.yml files are migrated next to the certificate
 #   * the config carries the detected network settings (lighthouse, port, punchy)
 #   * hand edits survive re-signs; --force/regenerate replaces them
 #   * `cert bundle` reuses the stored config unless a policy override is given
@@ -69,7 +70,7 @@ YAML
 export NEBULA_LOCAL_CONFIG="$LOCAL"
 
 cfg_path="$(pki_node_config_path node1.mesh "$keys")"
-assert_eq "path lives under configs/" "$cfg_path" "$keys/configs/node1.mesh.yml"
+assert_eq "config sits next to the certificate" "$cfg_path" "$keys/node1.mesh.yml"
 
 # --- generate at signing time / on demand -----------------------------------
 pki_node_config_write_for_fw node1.mesh "$keys" 0 >/dev/null 2>&1
@@ -97,6 +98,15 @@ latest_backup="$(find "$keys/backups" -mindepth 1 -maxdepth 1 -type d 2>/dev/nul
 assert_file "overwriting a config leaves a snapshot" "$latest_backup/ACTION.txt"
 assert_contains "the snapshot names the node-config action" \
     "$(cat "$latest_backup/ACTION.txt" 2>/dev/null)" "node-config node1.mesh"
+
+# --- legacy configs/<name>.yml is migrated automatically --------------------
+rm -f "$cfg_path"
+mkdir -p "$keys/configs"
+printf '# LEGACY-CONFIG\n' > "$keys/configs/node1.mesh.yml"
+pki_node_config_write_for_fw node1.mesh "$keys" 0 >/dev/null 2>&1
+assert_file "legacy config moved next to the certificate" "$cfg_path"
+assert_no_file "legacy config removed after migration" "$keys/configs/node1.mesh.yml"
+assert_contains "migration preserved the stored content" "$(cat "$cfg_path")" "LEGACY-CONFIG"
 
 # --- bundle reuses the stored config ---------------------------------------
 printf '# CUSTOM-EDIT-MARKER\n' >> "$cfg_path"
@@ -127,21 +137,21 @@ if command -v unzip >/dev/null 2>&1; then
 fi
 
 # --- all/refresh skips mobile certificates ----------------------------------
-rm -f "$keys/configs/node1.mesh.yml" "$keys/configs/vps.mesh.yml"
+rm -f "$keys/node1.mesh.yml" "$keys/vps.mesh.yml"
 pki_node_config_refresh_all "$keys" 0 >/dev/null 2>&1
-assert_file "refresh-all writes the node config" "$keys/configs/node1.mesh.yml"
-assert_file "refresh-all writes the lighthouse config" "$keys/configs/vps.mesh.yml"
+assert_file "refresh-all writes the node config" "$keys/node1.mesh.yml"
+assert_file "refresh-all writes the lighthouse config" "$keys/vps.mesh.yml"
 assert_contains "the lighthouse listens on the advertised port" \
-    "$(cat "$keys/configs/vps.mesh.yml")" "port: 4545"
-assert_no_file "mobile certificates have no client config" "$keys/configs/phone.mesh.yml"
+    "$(cat "$keys/vps.mesh.yml")" "port: 4545"
+assert_no_file "mobile certificates have no client config" "$keys/phone.mesh.yml"
 assert_eq "all rendering stayed unprivileged" "$(sudo_count)" "0"
 
 # --- signing writes a config automatically ----------------------------------
 node_fw_set auto.mesh default >/dev/null 2>&1
 node_fw_choose_tui() { return 0; }   # keep the fixture from driving that menu
 printf 'auto.mesh\nn\n10.100.0.20/24\nlab\nn\n\n' | generate_nebula_cert >/dev/null 2>&1
-assert_file "signing a node writes its config" "$keys/configs/auto.mesh.yml"
-auto_cfg="$(cat "$keys/configs/auto.mesh.yml")"
+assert_file "signing a node writes its config" "$keys/auto.mesh.yml"
+auto_cfg="$(cat "$keys/auto.mesh.yml")"
 assert_contains "the saved firewall choice is embedded" "$auto_cfg" "firewall: {}"
 
 # --- CLI --------------------------------------------------------------------
@@ -149,20 +159,20 @@ NM="$REPO_ROOT/nebula-manager"
 out="$("$NM" --cert-dir "$keys" cert config list 2>&1)"
 assert_contains "config list has a header" "$out" "Node config"
 assert_contains "config list shows node1" "$out" "node1.mesh"
-assert_contains "config list shows the config path" "$out" "$keys/configs/node1.mesh.yml"
+assert_contains "config list shows the config path" "$out" "$keys/node1.mesh.yml"
 assert_not_contains "config list omits mobile certs" "$out" "phone.mesh"
 
 path="$("$NM" --cert-dir "$keys" cert config path node1 2>/dev/null)"
-assert_eq "config path resolves a substring" "$path" "$keys/configs/node1.mesh.yml"
+assert_eq "config path resolves a substring" "$path" "$keys/node1.mesh.yml"
 
 out="$("$NM" --cert-dir "$keys" cert config show node1 2>/dev/null)"
 assert_contains "config show prints the YAML" "$out" "pki:"
 assert_contains "config show includes the lighthouse" "$out" "vps.mesh:4545"
 
-rm -f "$keys/configs/node1.mesh.yml"
+rm -f "$keys/node1.mesh.yml"
 out="$("$NM" --cert-dir "$keys" cert config generate node1 2>&1)"
 assert_eq "config generate exits successfully" "$?" "0"
-assert_file "config generate recreated the file" "$keys/configs/node1.mesh.yml"
+assert_file "config generate recreated the file" "$keys/node1.mesh.yml"
 
 out="$("$NM" --cert-dir "$keys" cert config generate --all --force 2>&1)"
 assert_eq "config generate --all exits successfully" "$?" "0"
@@ -188,7 +198,7 @@ elevate_log="$SANDBOX/elevate.log"
 elevate() { printf 'elevate %s\n' "$*" >> "$elevate_log"; "$@"; }
 path_requires_root() { return 0; }   # pretend an /etc/nebula-like workspace
 pki_node_config_write_for_fw node1.mesh "$priv" 0 >/dev/null 2>&1
-assert_file "privileged workspace gets its config" "$priv/configs/node1.mesh.yml"
+assert_file "privileged workspace gets its config" "$priv/node1.mesh.yml"
 assert_contains "privileged write creates the directory via elevate" "$(cat "$elevate_log")" "mkdir -p"
 assert_contains "privileged write installs the config via elevate" "$(cat "$elevate_log")" "node1.mesh.yml"
 assert_eq "never invoked mocked sudo directly" "$(sudo_count)" "0"

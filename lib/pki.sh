@@ -1054,7 +1054,7 @@ view_cert_details() {
     else
         log_error "Missing key file: $key_file"
     fi
-    local node_cfg="$certs_dir/configs/$cert_name.yml"
+    local node_cfg; node_cfg="$(pki_node_config_find "$cert_name" "$certs_dir")"
     if [[ -s "$node_cfg" ]]; then
         echo -e "\n${YELLOW}Node config:${RESET} $node_cfg"
     else
@@ -1095,10 +1095,13 @@ pki_remove() {
             cert_store_snapshot_before "$certs_dir" "remove $name" "$crt_file" "$key_file" || true
         fi
         rm -f "$crt_file" "$key_file" && log_success "Removed $crt_file and $key_file."
-        local node_cfg; node_cfg="$certs_dir/configs/$name.yml"
+        local node_cfg legacy_cfg
+        node_cfg="$(pki_node_config_path "$name" "$certs_dir")"
+        legacy_cfg="$(pki_node_config_legacy_path "$name" "$certs_dir")"
         if [[ -f "$node_cfg" ]] && rm -f "$node_cfg"; then
             log_info "Removed the node config: $node_cfg"
         fi
+        [[ -f "$legacy_cfg" ]] && rm -f "$legacy_cfg" 2>/dev/null || true
         if declare -F cert_store_log >/dev/null; then
             cert_store_log "$certs_dir" "remove name=\"$name\" snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
         fi
@@ -1663,15 +1666,70 @@ pki_write_client_config() {
 }
 
 # --- per-node client configs -------------------------------------------------
-# Each certificate can carry its own ready-to-use client config in the store:
-#   <cert-dir>/configs/<name>.yml
+# Each certificate carries its own ready-to-use client config next to the PKI:
+#   <cert-dir>/<name>.yml
 # It is generated when the certificate is signed (or on demand) and reused by
 # `cert bundle`, so exporting never silently invents network settings twice.
 # Everything is user-owned: no sudo unless the store itself is privileged.
+# Older releases stored these under <cert-dir>/configs/; those are migrated
+# automatically the next time the config is used or written.
 
 pki_node_config_path() {
     local name="${1:?certificate name required}" cert_dir="${2:-$(resolve_cert_dir)}"
+    printf '%s/%s.yml' "$cert_dir" "$name"
+}
+
+pki_node_config_legacy_path() {
+    local name="${1:?certificate name required}" cert_dir="${2:-$(resolve_cert_dir)}"
     printf '%s/configs/%s.yml' "$cert_dir" "$name"
+}
+
+# pki_node_config_find <name> [cert_dir]
+# Print the config that applies: the flat file, else a legacy configs/ file,
+# else the path a new config should be written to.
+pki_node_config_find() {
+    local name="${1:?certificate name required}" cert_dir="${2:-$(resolve_cert_dir)}"
+    local flat legacy
+    flat="$(pki_node_config_path "$name" "$cert_dir")"
+    legacy="$(pki_node_config_legacy_path "$name" "$cert_dir")"
+    if [[ -s "$flat" ]]; then printf '%s\n' "$flat"; return 0; fi
+    if [[ -s "$legacy" ]]; then printf '%s\n' "$legacy"; return 0; fi
+    printf '%s\n' "$flat"
+}
+
+# Move configs/*.yml next to the certificates. Called before writes and by the
+# list/refresh actions, so existing stores converge without manual cleanup.
+pki_node_config_migrate_one() {
+    local name="${1:?certificate name required}" cert_dir="${2:-$(resolve_cert_dir)}"
+    local flat legacy
+    flat="$(pki_node_config_path "$name" "$cert_dir")"
+    legacy="$(pki_node_config_legacy_path "$name" "$cert_dir")"
+    [[ -s "$legacy" ]] || return 0
+    if [[ -s "$flat" ]]; then
+        # Both exist: the flat file is authoritative. Drop the legacy copy only
+        # when it is byte-identical, otherwise keep it and warn.
+        if command -v cmp >/dev/null 2>&1 && cmp -s "$flat" "$legacy"; then
+            rm -f "$legacy" 2>/dev/null || true
+        else
+            log_warn "Both $flat and legacy $legacy exist; using $flat. Remove the legacy copy when you no longer need it."
+        fi
+        return 0
+    fi
+    if mv -f "$legacy" "$flat" 2>/dev/null; then
+        log_info "Moved node config next to the certificate: $flat"
+    elif declare -F elevate >/dev/null && declare -F path_requires_root >/dev/null \
+        && path_requires_root "$cert_dir"; then
+        if elevate mv -f "$legacy" "$flat"; then
+            log_info "Moved node config next to the certificate: $flat"
+        else
+            log_warn "Could not move $legacy to $flat"
+            return 1
+        fi
+    else
+        log_warn "Could not move $legacy to $flat"
+        return 1
+    fi
+    return 0
 }
 
 # pki_node_config_policy <cert> ; print the policy file for the saved firewall
@@ -1700,23 +1758,31 @@ pki_node_config_policy() {
 }
 
 # pki_node_config_write <name> [cert_dir] [policy_path] [force]
-# Render (or keep) <cert-dir>/configs/<name>.yml. By default an existing file is
-# left alone so hand edits survive re-signs; force=1 regenerates it.
+# Render (or keep) <cert-dir>/<name>.yml. By default an existing file is left
+# alone so hand edits survive re-signs; force=1 regenerates it.
 pki_node_config_write() {
     local name="${1:?certificate name required}"
     local cert_dir="${2:-$(resolve_cert_dir)}" policy="${3:-}" force="${4:-0}"
-    local path dir tmp
+    local path dir legacy tmp
     path="$(pki_node_config_path "$name" "$cert_dir")"
+    legacy="$(pki_node_config_legacy_path "$name" "$cert_dir")"
     dir="$(dirname "$path")"
+
+    # Converge old workspaces first (only when not force-overwriting flat).
+    if [[ ! -s "$path" && -s "$legacy" ]]; then
+        pki_node_config_migrate_one "$name" "$cert_dir" >/dev/null 2>&1 || true
+    fi
     if [[ -s "$path" && "$force" != 1 ]]; then
         debug_info "node config exists: $path (kept; regenerate to refresh)"
         return 0
     fi
     # Regenerating a hand-edited config is destructive: keep the old one in the
     # store history (git commit or backups/<timestamp>-node-config-*).
-    if [[ -s "$path" ]] && declare -F cert_store_snapshot_before >/dev/null; then
+    local old_cfg="$path"
+    [[ -s "$old_cfg" ]] || old_cfg="$legacy"
+    if [[ -s "$old_cfg" ]] && declare -F cert_store_snapshot_before >/dev/null; then
         CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
-        cert_store_snapshot_before "$cert_dir" "node-config $name (overwrite)" "$path" || true
+        cert_store_snapshot_before "$cert_dir" "node-config $name (overwrite)" "$old_cfg" || true
     fi
     # A root-owned store (e.g. /etc/nebula) needs one elevated write per file.
     # Render in a user-writable temp file first; only the install is elevated.
@@ -1730,7 +1796,7 @@ pki_node_config_write() {
         ensure_dir "$dir" || { log_error "Cannot create $dir"; return 1; }
         tmp="$(mktemp "$dir/.$name.yml.XXXXXX")" || return 1
     fi
-    if ! pki_write_client_config "$tmp" "$name" "$cert_dir" "$policy" "configs/$name.yml"; then
+    if ! pki_write_client_config "$tmp" "$name" "$cert_dir" "$policy" "$name.yml"; then
         rm -f "$tmp"
         return 1
     fi
@@ -1748,6 +1814,10 @@ pki_node_config_write() {
         return 1
     fi
     [[ "$privileged" == 1 ]] || chmod 600 "$path" 2>/dev/null || true
+    # The flat file is now authoritative; drop an identical legacy duplicate.
+    if [[ -s "$legacy" ]] && command -v cmp >/dev/null 2>&1 && cmp -s "$path" "$legacy"; then
+        rm -f "$legacy" 2>/dev/null || true
+    fi
     if declare -F cert_store_log >/dev/null; then
         CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
         cert_store_log "$cert_dir" "node-config name=\"$name\" force=$force snapshot=\"${CERT_STORE_LAST_SNAPSHOT:-none}\""
@@ -1780,7 +1850,8 @@ pki_node_config_list() {
     printf '%-34s %-18s %-22s %s\n' "Certificate" "IP(s)" "Groups" "Node config"
     while IFS=$'\t' read -r name ips groups; do
         [[ -n "$name" ]] || continue
-        path="$(pki_node_config_path "$name" "$cert_dir")"
+        pki_node_config_migrate_one "$name" "$cert_dir" >/dev/null 2>&1 || true
+        path="$(pki_node_config_find "$name" "$cert_dir")"
         if [[ -s "$path" ]]; then
             found=1
             printf '%-34s %-18s %-22s %s\n' "$name" "${ips:-N/A}" "${groups//,/:}" "$path"
@@ -1815,7 +1886,7 @@ pki_node_config_pick() {
     local -a pairs=()
     while IFS=$'\t' read -r name ips groups; do
         [[ -n "$name" ]] || continue
-        path="$(pki_node_config_path "$name" "$cert_dir")"
+        path="$(pki_node_config_find "$name" "$cert_dir")"
         desc="${ips:-no IP}"
         [[ -n "$groups" ]] && desc+=" [${groups//,/:}]"
         [[ -s "$path" ]] && desc+=" - config" || desc+=" - no config"
@@ -1832,7 +1903,7 @@ pki_node_config_menu_tui() {
     while true; do
         local choice name path
         choice="$(ui_menu "Node client configs" \
-            "Ready-to-deploy config.yml files for individual nodes ($cert_dir/configs)." \
+            "Ready-to-deploy config.yml files stored next to each certificate ($cert_dir/<name>.yml)." \
             edit "Edit the config for one certificate" \
             show "Show the config for one certificate" \
             regen "Regenerate the config for one certificate" \
@@ -2220,7 +2291,6 @@ pki_bundle_client_zip() {
     # Prefer the node's stored config so local edits and the firewall chosen at
     # signing time are what actually ships. An explicit policy/firewall override
     # on the command line still wins and refreshes the stored copy.
-    local node_cfg; node_cfg="$(pki_node_config_path "$name" "$cert_dir")"
     if [[ -n "$policy_path" ]]; then
         pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" "$policy_path" || {
             log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
@@ -2231,6 +2301,7 @@ pki_bundle_client_zip() {
         if declare -F pki_node_config_write_for_fw >/dev/null; then
             pki_node_config_write_for_fw "$name" "$cert_dir" 0 >/dev/null || true
         fi
+        local node_cfg; node_cfg="$(pki_node_config_find "$name" "$cert_dir")"
         if [[ -s "$node_cfg" ]]; then
             cp "$node_cfg" "$tmp/config.yml.template"
             debug_info "bundle config: reusing stored node config $node_cfg"
@@ -3246,7 +3317,8 @@ pki_node_config_cli() {
         cat >&2 <<'EOF'
 Usage: nebula-manager cert config <command> [options]
 
-Ready-to-deploy client configs stored as <cert-dir>/configs/<name>.yml.
+Ready-to-deploy client configs stored next to the certificate:
+<cert-dir>/<name>.yml (older configs/ files are migrated automatically).
 
   list                         List local certificates and their config file
   show <name|match>            Print a certificate's client config
@@ -3277,7 +3349,8 @@ EOF
                 2) log_error "Ambiguous certificate name '$name'. Matches: ${PKI_BUNDLE_MATCHES[*]}"; return 2 ;;
                 *) log_error "No certificate with a local key matching '$name' in $cert_dir."; return 1 ;;
             esac
-            local path; path="$(pki_node_config_path "$name" "$cert_dir")"
+            pki_node_config_migrate_one "$name" "$cert_dir" >/dev/null 2>&1 || true
+            local path; path="$(pki_node_config_find "$name" "$cert_dir")"
             case "$sub" in
                 path) printf '%s\n' "$path" ;;
                 show)

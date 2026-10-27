@@ -386,7 +386,7 @@ new `.key`) to the nodes — e.g. with a client bundle, the self-contained
 installer, or the Fleet menu. Nodes whose key changed must receive the new key
 or they will fall out of the mesh.
 
-### Per-node client configs (`configs/<name>.yml`)
+### Per-node client configs (`<name>.yml` next to the certificate)
 
 Every local certificate now keeps its ready-to-deploy client config **in the
 workspace**, next to the PKI:
@@ -396,9 +396,11 @@ workspace**, next to the PKI:
 ├── ca.crt
 ├── node1.mesh.crt
 ├── node1.mesh.key
-└── configs/
-    └── node1.mesh.yml     # pki paths, static_host_map, lighthouse, punchy, firewall, tun
+└── node1.mesh.yml     # pki paths, static_host_map, lighthouse, punchy, firewall, tun
 ```
+
+Older releases kept these in a `configs/` subdirectory. Those files are moved
+next to the certificate automatically the next time they are used or generated.
 
 - The file is written **when the certificate is signed** (the firewall you pick
   for the node is embedded) and kept in sync by re-signing/resign-all when it is
@@ -685,7 +687,7 @@ headless subcommands for scripting — see *Expert / scriptable* below.
 |---|---|
 | **Manager Setup** | shows the **detected state** (manager config, Nebula service, cert workspace), then: import/update from this host, **import a client bundle (.zip/.tar.gz)**, create, browse, edit, delete `nebula-manager.conf`, manage instances, pick the certificate workspace |
 | **Instances** | list / add / enable-disable / remove `[server.*]` entries, and start/stop the selected instance's service |
-| **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`configs/<name>.yml`: generate/edit/refresh), revoke, switch workspace, store backup/git |
+| **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`<name>.yml` next to each cert: generate/edit/refresh), revoke, switch workspace, store backup/git |
 | **Fleet** | **croc mass deployment** (one code per student/node), **SSH push** of a config/firewall change, and SSH reachability probing |
 | **Instance Settings** | validate / edit Nebula `config.yml` (service-owned files are edited on a working copy and saved once with a timestamped backup), edit firewall rules with a **group picker + rule templates + explain**, **policy packs** (embed in bundles / apply / export), **name resolution (Nebula DNS)** |
 | **Connectivity** | ping every cert IP; optional `iperf3` test |
@@ -1359,7 +1361,7 @@ What it covers:
 | `tests/test_dns.sh` | Nebula DNS: lighthouse `serve_dns` + UDP/53 firewall, client `resolvectl` DNS/domain setup, status output, static_host_map fallback |
 | `tests/test_duration.sh` | human certificate durations (`720`, `720h`, `365d`, `52w`, `10y`) normalized to Go hours; invalid/zero/fractional input rejected; CA defaults offered from the current CA or the newest backup |
 | `tests/test_resign_all.sh` | one-shot CA rotation: dry-run/no-op, non-TTY refusal, old-CA certs re-issued by the new CA, `--keep-keys`, default key rotation, device-key preservation, `--skip-device`, snapshot + action log, no sudo, CLI `cert resign-all` |
-| `tests/test_node_config.sh` | per-node `configs/<name>.yml`: signing writes it, detected network settings/firewall embedded, hand edits survive, `--force` refreshes, bundle reuses it, explicit policy overrides, mobile skipped, CLI list/show/path/generate, no sudo |
+| `tests/test_node_config.sh` | per-node `<name>.yml` next to the cert: signing writes it, detected network settings/firewall embedded, hand edits survive, `--force` refreshes, bundle reuses it, explicit policy overrides, legacy `configs/` auto-migration, mobile skipped, CLI list/show/path/generate, no sudo |
 | `tests/test_rename_group.sh` | group migration: preview/scan, dedup + order, re-sign preserves name/IP/expiry, unaffected certs/keys byte-identical, `*.crt.bak`, no sudo, CLI `--yes`/non-tty refusal |
 | `tests/test_group_batch.sh` | selector grammar (`group`/`without`/`name` glob/`ip` CIDR/`cert`/union/exclude) + batch add/remove/move/set/prune, idempotency, `--dry-run`, non-tty refusal, `group list`, plain checklist parsing |
 | `tests/test_firewall_groups.sh` | firewall group discovery/counts, picker (defaults/manual/unknown groups), rule templates, editor picker wiring, explain (defaults/matches/typo warning), diff + save prompt, CLI |

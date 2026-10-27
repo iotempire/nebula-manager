@@ -121,7 +121,7 @@ assert_file "CLI bundle exists" "$SANDBOX/cliout/home1.mesh-nebula-bundle.zip"
 # Without --policy the CLI only suggests, never applies. Drop the per-node
 # config that the explicit-policy bundle refreshed earlier, so this checks the
 # fresh-detection path rather than the (intentional) reuse of a stored config.
-rm -f "$keys/configs/home1.mesh.yml"
+rm -f "$keys/home1.mesh.yml"
 mkdir -p "$SANDBOX/cliout2"
 hint="$(bash "$REPO_ROOT/nebula-manager" cert bundle home1.mesh --cert-dir "$keys" \
     --out "$SANDBOX/cliout2" 2>&1)"

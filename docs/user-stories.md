@@ -34,7 +34,7 @@ Start the tool and everything is selectable from the text-graphical menus:
 |---|---|
 | **Manager Setup** | shows the detected state, then Import/Update / **Import client bundle** / Create / Browse / Edit / Delete config, Manage instances, Certificate Workspace |
 | **Instances** | List / Add / Enable-Disable / Remove `[server.*]`, start/stop the service |
-| **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / View / Expiry / **per-node client configs** (`configs/<name>.yml`) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
+| **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / View / Expiry / **per-node client configs** (`<name>.yml` next to each cert) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
 | **Fleet** | **croc mass deployment** (one code per student) / **SSH push** of a config or firewall / SSH reachability probe |
 | **Instance Settings** | Validate / Edit Nebula `config.yml` / Firewall / Name resolution |
 | **Connectivity** | ping all cert IPs (+ optional `iperf3`) |
@@ -177,8 +177,8 @@ free address `10.100.0.4/24`) — just press Enter to accept:
 
 After signing, the tool asks which **firewall the new node's client template**
 should carry (a suggested policy pack, this host's firewall, permissive, Nebula
-defaults, or decide later). It then writes the complete client config to the
-workspace as `configs/theprof3.theprof.mesh.yml` (cert/key next to it), embeds
+defaults, or decide later). It then writes the complete client config next to
+the certificate as `theprof3.theprof.mesh.yml` (key and crt alongside), embeds
 that firewall, and remembers the choice per certificate.
 
 ```bash
@@ -193,7 +193,7 @@ $ nebula-manager cert bundle theprof4.theprof.mesh --out ./bundles
 
 Each bundle (`./bundles/theprof3.theprof.mesh-nebula-bundle.zip`) contains the cert, key,
 `ca.crt` and a `config.yml.template`. The template is the **stored per-node
-config** (`configs/theprof3.theprof.mesh.yml`), populated from the running
+config** (`theprof3.theprof.mesh.yml`, next to the cert/key), populated from the running
 Nebula config (or from the `[server.*]` entries + certificates): real
 `static_host_map`/`lighthouse.hosts`, `punchy`, `listen`, `tun` and the firewall
 policy. Anything that cannot be determined is flagged in the file and as a
