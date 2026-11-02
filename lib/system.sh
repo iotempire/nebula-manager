@@ -1859,6 +1859,9 @@ version_gt() {
 # update_available <local> <remote> -> success only when remote is strictly newer
 update_available() { version_gt "$2" "$1"; }
 
+# NOTE: not called in this fork. `check_script_update` is the only caller and
+# its startup call in `tui_main` is commented out, because this tree is a
+# rewrite of upstream's monolith and a self-update would replace it.
 # Install an update. Git checkouts are never auto-clobbered (you may have local
 # work); file installs fetch the entrypoint + modules with checksum checking.
 perform_manager_update() {
@@ -1936,6 +1939,9 @@ perform_manager_update() {
     return 0
 }
 
+# NOTE: intentionally not invoked by the TUI in this fork (see `tui_main` in
+# `nebula-manager`). Kept so repo/version resolution stays available to
+# `paths`, the tests and a deliberate re-enable.
 check_script_update() {
   [[ "${DISABLE_VERSION_CHECK:-false}" == true ]] && return
   local now last_check_age latest_version

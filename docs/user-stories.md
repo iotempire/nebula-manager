@@ -800,10 +800,10 @@ The installer:
 | **`import`** (discover a running Nebula) and **`import --bundle --start`** (install + service) |
 | **`instance add/list/remove/enable/disable`** (`server` alias) |
 | **Fleet croc** mass deployment (one code per node) |
-| **Single-file release build** (`make build`, one-curl install/update) |
+| **Single-file release build** (`make build`, one-curl install) |
 | **Fleet SSH** probe, config/firewall push, validation and restart |
 | Windows-native bundle installer (`install.ps1`) |
-| Update checks and auto-update |
+| Nebula update checks and auto-update scheduler (the Manager self-update is disabled) |
 
 These stories double as acceptance criteria for the workflows above. Open items
 (profiles, macOS launchd in the TUI, pod/container support, and real

@@ -60,7 +60,7 @@ make build              # or: make release   (alias)
 Pushing a tag matching `v*` runs `.github/workflows/release-single-file.yml`,
 which builds the artifact and attaches both files to the GitHub Release (a
 manual run takes a tag as input). That is the asset used by the one-`curl`
-installation and by self-update.
+installation and by the (currently disabled) self-update.
 
 Release checklist: bump `VERSION`, commit, then tag the same value
 (`git tag "v$(cat VERSION)" && git push origin "v$(cat VERSION)"`). The
@@ -70,9 +70,9 @@ On first run the generated script materialises the embedded assets into
 `${XDG_CACHE_HOME:-$HOME/.cache}/nebula-manager/single-file-assets/<version>-<asset-hash>/`
 (creating `bundle/` inside), points `MANAGER_LIB_DIR` at that directory and sets
 `NEBULA_MANAGER_SINGLE_FILE=1`. Later runs reuse the cache, so the template and
-bundle installers work offline. In single-file mode the self-update downloads
-only the release asset and its `.sha256` (override the source with
-`NEBULA_MANAGER_SINGLE_URL`).
+bundle installers work offline. In single-file mode the (disabled) self-update
+would download only the release asset and its `.sha256` (override the source
+with `NEBULA_MANAGER_SINGLE_URL`).
 
 ### Privilege model
 
@@ -102,7 +102,7 @@ only the release asset and its `.sha256` (override the source with
     elevated re-test** instead of reporting a misleading “invalid config”.
 
 Privileged actions (the only ones that use `sudo`):
-`mkdir/chmod/write under system paths`, `mkdir -p /etc/nebula` + template download, systemd (`daemon-reload`, `enable`, `start/stop/restart/reload`), installing binaries into `bin_path`, and the self-update copy.
+`mkdir/chmod/write under system paths`, `mkdir -p /etc/nebula` + template download, systemd (`daemon-reload`, `enable`, `start/stop/restart/reload`), installing binaries into `bin_path`, and the (disabled) self-update copy.
 
 ---
 
@@ -191,10 +191,11 @@ Guidelines that keep this workable:
   history and every clone depend on it. (The history was rebuilt once after a
   credential leak, so that it again descends from the genuine upstream commit
   chain — that rebuild is why old SHAs are no longer valid.)
-- **Update checks follow `origin`**, so this fork checks its own releases. The
-  single-file build has no `.git` and falls back to `iotempire/nebula-manager`;
-  set `NEBULA_MANAGER_REPO=jordanhillis/nebula-manager` to compare against the
-  original project instead.
+- **The Manager self-update is disabled**, because it would replace this tree
+  with a single-file release. `paths` still resolves git `origin` →
+  `NEBULA_MANAGER_REPO` → `iotempire/nebula-manager`, as described in
+  [operations.md](operations.md#nebula-manager-updates-disabled-in-this-fork).
+  The **Nebula binary** updater is unaffected.
 - **Releases** (the one-curl `dist/nebula-manager` asset) are published from
   this fork's `v*` tags by `.github/workflows/release-single-file.yml`:
   `git tag "v$(cat VERSION)" && git push origin "v$(cat VERSION)"`.

@@ -37,35 +37,45 @@ Looking for more answers? Check the [Full FAQ on GitHub Wiki »](https://github.
   Set `default_port` to your usual port (e.g. `4545`) to avoid ambiguity.
 - **Systemd (not containers), for now.** The tool assumes Nebula runs as a host
   systemd unit. Pod/container support is tracked in the [Roadmap](roadmap.md).
-- **Update checks follow your source repo, not upstream.** The version check and
-  self-update resolve the repo as `NEBULA_MANAGER_REPO` → git `origin` → built-in
-  default (`iotempire/nebula-manager`), so a fork checks itself. An update is
-  only offered when the published version is **strictly newer** (semantic
-  comparison), never as a downgrade. Git checkouts are never auto-overwritten —
-  the tool tells you to `git pull` instead.
+- **The Manager's own self-update is disabled in this fork.** It would replace
+  the modular tree with a single-file release — and could adopt another
+  publisher's codebase entirely. Update with git instead; see
+  [development.md ▸ How this fork relates to upstream](development.md#-how-this-fork-relates-to-upstream).
+  The **Nebula binary** check and update are unaffected.
 
 ---
 
-## Update checks & forks
+## Nebula Manager updates (disabled in this fork)
 
-Nebula Manager checks for newer versions of **itself** at startup (and via
-`--auto-update-nebula`). Where it checks depends on where your copy came from,
-in this order:
+The academic edition replaced upstream's monolithic `nebula-manager.sh` with the
+`nebula-manager` entrypoint plus `lib/` modules, tests and docs. A self-update
+would download a single-file release **over** that tree — and if `origin`
+pointed at another publisher, it would adopt *that* codebase instead. The
+startup call is therefore commented out (`tui_main` in `nebula-manager`);
+`check_script_update` and `perform_manager_update` remain in `lib/system.sh`
+for reference, together with their tests.
 
-1. `NEBULA_MANAGER_REPO` (`owner/repo`), if set
-2. the git remote **`origin`** of the checkout it is running from
-3. the built-in default: **`iotempire/nebula-manager`**
+Update this fork the way it is developed:
 
-So a fork checks *itself* by default. An update is only offered when the
-published version is **strictly newer** than the running one (version-aware
-comparison, e.g. `1.10 > 1.9`) — a fork that is ahead of upstream is never
-offered a downgrade. The result is cached per repo for 6 hours at
-`/tmp/nebula-manager-version-<owner>_<repo>.cache`.
+```bash
+git fetch upstream        # optional: Jordan's new commits
+git rebase upstream/main  # replay our commits on top
+git push origin main
+```
 
-### Checking upstream explicitly
+Only the **Manager** is affected: the **Nebula binary** check and the
+auto-update scheduler (`--auto-update-nebula`) still work as before.
 
-To compare against the canonical project instead of your fork, point the check
-at the upstream repo:
+### Repo resolution (used by `paths`, and by the dormant check)
+
+The check resolves the repo as `NEBULA_MANAGER_REPO` → git `origin` → built-in
+default `iotempire/nebula-manager`, in that order. Results are cached per repo
+for 6 hours at `/tmp/nebula-manager-version-<owner>_<repo>.cache`.
+
+### Resolving the original project
+
+`NEBULA_MANAGER_REPO` wins over git `origin`, so you can see what a check would
+resolve to — or point it at Jordan's project explicitly:
 
 ```bash
 # one-off
@@ -84,15 +94,16 @@ NEBULA_MANAGER_REPO=jordanhillis/nebula-manager NEBULA_MANAGER_REF=main ./nebula
 Confirm what is being checked with `paths`:
 
 ```bash
-./nebula-manager paths      # -> update-repo: theprof/nebula-manager@main
+./nebula-manager paths      # -> update-repo: iotempire/nebula-manager@main
 ```
 
-### Disabling the check
+### Re-enabling the check
 
-Set `disable_version_check=true` under `[global]` in `nebula-manager.conf`.
-(The same setting also silences the "update available" prompt.)
+Uncomment `check_script_update` in `tui_main` (`nebula-manager`). With the
+check active, `disable_version_check=true` under `[global]` in
+`nebula-manager.conf` suppresses it again.
 
-### What accepting an update does
+### What the update code does (reference)
 
 - **Git checkout:** the tool never overwrites your working tree. It prints the
 exact command to use instead (`git -C <dir> pull --ff-only`).

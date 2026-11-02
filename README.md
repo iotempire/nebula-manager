@@ -160,8 +160,8 @@ Every menu action has a headless equivalent:
 | **Nebula lifecycle** | install/update from official releases with rollback, auto-update scheduler, service control → [usage.md](docs/usage.md) |
 | **Adoption** | `import` discovers a running Nebula and proposes `nebula-manager.conf` → [getting-started.md](docs/getting-started.md) |
 | **Safety** | dry runs, diffs, `*.crt.bak`, datestamped `backups/`, optional git snapshots, action log → [certificates.md](docs/certificates.md#store-history-backups--git) |
-| **Updates** | Nebula update with rollback; self-update check with fork/upstream resolution → [operations.md](docs/operations.md#update-checks--forks) |
-| **Release** | one-`curl` single-file artifact (`make build`), checksum, self-update → [development.md](docs/development.md#single-file-release-build) |
+| **Updates** | Nebula update with rollback; the Manager self-update is disabled (update via git) → [operations.md](docs/operations.md#nebula-manager-updates-disabled-in-this-fork) |
+| **Release** | one-`curl` single-file artifact (`make build`), checksum, tag-driven publishing → [development.md](docs/development.md#single-file-release-build) |
 
 ---
 
@@ -206,8 +206,8 @@ chmod +x nebula-manager
 The single file needs no `lib/` directory: on first run it materialises the
 embedded config template and client-bundle installers into
 `${XDG_CACHE_HOME:-~/.cache}/nebula-manager/single-file-assets/<version>-<asset-hash>/`.
-Self-update uses the same release asset; point a fork at its own asset with
-`NEBULA_MANAGER_SINGLE_URL`.
+The Manager's self-update is disabled in this fork (it would overwrite the
+source tree); update a checkout with git instead.
 
 Build it locally with:
 

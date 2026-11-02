@@ -305,7 +305,15 @@ tui_main() {
         load_global_config
         check_dependencies || exit 1
         banner
-        check_script_update
+        # -----------------------------------------------------------------
+        # Nebula Manager self-update is DISABLED in this fork.
+        # This project is a rewrite of upstream's monolithic script: accepting
+        # a published "update" would replace the modular tree (lib/, tests/,
+        # docs/) with a single file, and could pull another publisher's
+        # release entirely. Update from git instead:
+        #   git fetch upstream && git rebase upstream/main && git push
+        # Re-enable the prompt by restoring the call below.
+        # check_script_update
         if select_nebula_server; then
             # Offer a certificate workspace if none is known yet (first run).
             first_run_workspace_setup
@@ -434,7 +442,7 @@ Environment:
   NEBULA_CLEAR_SCREEN  Set to 1 to clear between TUI redraws (default: off)
 
 Update checks follow your repo (git origin -> NEBULA_MANAGER_REPO -> upstream).
-To check the upstream project explicitly:
+The Nebula Manager self-update is disabled in this fork; update with git.
   NEBULA_MANAGER_REPO=jordanhillis/nebula-manager nebula-manager
 EOF
 }

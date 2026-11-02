@@ -259,7 +259,7 @@ You can always point at any file with `--config`:
 | `default_port` | Nebula listen port used by diagnostics when `config.yml` has `port: 0` | `4242` |
 | `use_color` | Enable colored output | `true` |
 | `use_icons` | Enable UI icons/symbols | `true` |
-| `disable_version_check` | Skip script version checks | `false` |
+| `disable_version_check` | Kept for compatibility; the Manager self-update is commented out in this fork | `false` |
 | `ignore_dependency_check` | Skip dependency verification | `false` |
 | `ignore_nebula_update` | Don't prompt about Nebula updates | `false` |
 

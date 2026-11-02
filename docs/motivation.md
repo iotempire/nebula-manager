@@ -77,8 +77,9 @@ running a class exposed a different set of requirements:
   functions; documentation shows both.
 - **Stories as acceptance criteria.** The user stories are not marketing — they
   describe real workflows and are kept in sync with the tool.
-- **Upstream-friendly.** The fork keeps the original structure and credits, and
-  its update check resolves the fork first, then the upstream repository.
+- **Upstream-friendly.** The fork keeps the original structure and credits,
+  tracks Jordan's repository as `upstream`, and rebases onto it; only the
+  Manager's own self-update is disabled (it would overwrite the rewrite).
 
 ## Scope and non-goals
 
