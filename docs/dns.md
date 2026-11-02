@@ -43,6 +43,14 @@ Option 2 also installs `nebula-manager-resolved.service`, which reapplies the
 settings after `nebula.service` starts. Only the mesh suffix is routed to
 Nebula, so public DNS keeps working.
 
+### Bundles set it up on install
+
+A client bundle carries `nebula-dns.conf` (mesh suffix + lighthouse overlay
+IPs). `install.sh` applies the two `resolvectl` commands and installs the boot
+hook, so a fresh client resolves mesh names without running nebula-manager.
+Use `--no-dns` to skip it; `--no-start` also skips it, because DNS needs the
+interface to be up.
+
 ```bash
 nebula-manager dns status       # role, interface, lighthouse IPs, resolver/hook
 nebula-manager dns setup        # interactive action menu

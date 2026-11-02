@@ -22,6 +22,7 @@ SERVICE=""
 ASSUME_YES="${NEBULA_INSTALL_YES:-0}"
 NO_START=0
 CERTS_ONLY=0
+NO_DNS=0
 
 say()  { printf '[install] %s\n' "$*"; }
 warn() { printf '[install] WARNING: %s\n' "$*" >&2; }
@@ -37,6 +38,7 @@ Options:
   -y, --yes            Do not ask before overwriting an existing config.yml
       --certs-only     Install/refresh only cert/key/CA; keep any config.yml
       --no-start       Install files only; do not (re)start the service
+      --no-dns         Do not configure systemd-resolved (mesh DNS)
   -h, --help           This help
 
 The archive contains a private key: transfer it over a trusted channel and
@@ -53,6 +55,7 @@ while (( $# )); do
         -y|--yes)       ASSUME_YES=1; shift ;;
         --certs-only)   CERTS_ONLY=1; shift ;;
         --no-start)     NO_START=1; shift ;;
+        --no-dns)       NO_DNS=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         *)              warn "Unknown option: $1"; usage >&2; exit 2 ;;
     esac
@@ -60,6 +63,7 @@ done
 
 DIR="${DIR/#\~/$HOME}"
 [[ -n "$DIR" ]] || die "Empty install directory"
+SVC="$(basename "${SERVICE:-nebula.service}")"
 
 # --- elevation policy -------------------------------------------------------
 # Use sudo only when the target really is not writable by us (or when we are
@@ -78,6 +82,14 @@ if [[ "$(id -u)" -ne 0 ]]; then
             || die "root is required for $DIR and sudo is not installed"
         SUDO="sudo"
     fi
+fi
+
+# If the unit runs as an unprivileged user, the files must be owned by that
+# user: the private key is mode 600 and otherwise unreadable for the service.
+SERVICE_USER=""
+if [[ -n "$SUDO" ]] && command -v systemctl >/dev/null 2>&1; then
+    SERVICE_USER="$(systemctl show -p User --value "$SVC" 2>/dev/null || true)"
+    [[ "$SERVICE_USER" == "root" ]] && SERVICE_USER=""
 fi
 asroot() { if [[ -n "$SUDO" ]]; then sudo "$@"; else "$@"; fi; }
 
@@ -177,11 +189,21 @@ backup "$DIR/$NAME.crt"
 backup "$DIR/$NAME.key"
 backup "$DIR/ca.crt"
 
+# Keep the ownership of an existing installation when the unit names no user
+# (service-owned /etc/nebula directories often belong to a dedicated uid).
+if [[ -z "$SERVICE_USER" && -n "$SUDO" && -e "$DIR/$NAME.crt" ]]; then
+    SERVICE_USER="$(ls -nd "$DIR/$NAME.crt" 2>/dev/null | awk '{ print $3":"$4 }')"
+fi
+
 asroot cp "$CERT" "$DIR/$NAME.crt" || { rm -f "$RENDERED"; die "failed to install $NAME.crt"; }
 asroot cp "$KEY"  "$DIR/$NAME.key"  || { rm -f "$RENDERED"; die "failed to install $NAME.key"; }
 asroot cp "$CA"   "$DIR/ca.crt"     || { rm -f "$RENDERED"; die "failed to install ca.crt"; }
 asroot chmod 644 "$DIR/$NAME.crt" "$DIR/ca.crt" 2>/dev/null || true
 asroot chmod 600 "$DIR/$NAME.key" 2>/dev/null || true
+if [[ -n "$SERVICE_USER" ]]; then
+    asroot chown "$SERVICE_USER" "$DIR/$NAME.crt" "$DIR/$NAME.key" "$DIR/ca.crt" 2>/dev/null \
+        || warn "could not hand the installed files to '$SERVICE_USER'"
+fi
 if [[ "$CERTS_ONLY" == "1" ]]; then
     if [[ -f "$CONFIG" ]]; then
         say "Kept the existing config.yml (--certs-only)"
@@ -191,6 +213,7 @@ if [[ "$CERTS_ONLY" == "1" ]]; then
 else
     asroot cp "$RENDERED" "$CONFIG" || { rm -f "$RENDERED"; die "failed to install config.yml"; }
     asroot chmod 644 "$CONFIG" 2>/dev/null || true
+    [[ -n "$SERVICE_USER" ]] && asroot chown "$SERVICE_USER" "$CONFIG" 2>/dev/null || true
 fi
 rm -f "$RENDERED"
 
@@ -210,7 +233,13 @@ elif [[ -x "$DIR/nebula" ]]; then
 fi
 if [[ -n "$NEBULA" ]]; then
     if [[ -f "$CONFIG" ]]; then
-        if "$NEBULA" -test -config "$CONFIG"; then
+        # A root-owned 600 key cannot be read as the invoking user; validate
+        # with the same privilege used to install the files.
+        VAL_CMD=( "$NEBULA" )
+        if [[ -n "$SUDO" ]] && { [[ ! -r "$CONFIG" ]] || [[ ! -r "$DIR/$NAME.key" ]]; }; then
+            VAL_CMD=( asroot "$NEBULA" )
+        fi
+        if "${VAL_CMD[@]}" -test -config "$CONFIG"; then
             say "Configuration validated with nebula -test"
         else
             warn "nebula -test reported a problem; check $CONFIG before starting the service"
@@ -225,6 +254,7 @@ fi
 
 # --- guidance when Nebula itself is not set up ------------------------------
 NEED_UNIT=0
+START_FAILED=0
 : "${NEED_BINARY:=0}"
 print_next_steps() {
     (( NEED_BINARY || NEED_UNIT )) || return 0
@@ -249,9 +279,92 @@ print_next_steps() {
     say "  Certificates and config are already in $DIR."
 }
 
+# --- optional mesh DNS (systemd-resolved) -----------------------------------
+# The bundle carries nebula-dns.conf when the mesh suffix and the lighthouse
+# overlay IPs were known at export time.
+install_resolved_hook() {
+    local iface="$1" domain="$2"; shift 2
+    local -a ips=("$@")
+    local rc; rc="$(command -v resolvectl)" || return 0
+    local tmp; tmp="$(mktemp)"
+    {
+        printf '[Unit]\n'
+        printf 'Description=Apply Nebula DNS settings to systemd-resolved\n'
+        printf 'After=%s\n' "$SVC"
+        printf 'Wants=%s\n\n' "$SVC"
+        printf '[Service]\n'
+        printf 'Type=oneshot\n'
+        printf 'ExecStartPre=-/usr/bin/sleep 2\n'
+        printf 'ExecStart=-%s dns %s %s\n' "$rc" "$iface" "${ips[*]}"
+        printf 'ExecStart=-%s domain %s ~%s\n' "$rc" "$iface" "$domain"
+        printf 'RemainAfterExit=yes\n\n'
+        printf '[Install]\n'
+        printf 'WantedBy=multi-user.target\n'
+    } > "$tmp"
+    local dest="/etc/systemd/system/nebula-manager-resolved.service"
+    if asroot cp "$tmp" "$dest"; then
+        asroot systemctl daemon-reload >/dev/null 2>&1 || true
+        if asroot systemctl enable --now nebula-manager-resolved.service >/dev/null 2>&1; then
+            say "Installed $dest (reapplies mesh DNS on boot)"
+        else
+            warn "could not enable nebula-manager-resolved.service"
+        fi
+    else
+        warn "could not install $dest"
+    fi
+    rm -f "$tmp"
+}
+
+apply_bundle_dns() {
+    local f="$BUNDLE_DIR/nebula-dns.conf"
+    [[ -f "$f" ]] || return 0
+    [[ "$(uname -s 2>/dev/null)" == "Linux" ]] || return 0
+    local TUN="" DOMAIN="" LIGHTHOUSES=""
+    local k v
+    while IFS='=' read -r k v; do
+        v="${v%\"}"; v="${v#\"}"
+        case "$k" in
+            TUN)         TUN="$v" ;;
+            DOMAIN)      DOMAIN="$v" ;;
+            LIGHTHOUSES) LIGHTHOUSES="$v" ;;
+        esac
+    done < "$f"
+    [[ -n "${DOMAIN:-}" && -n "${LIGHTHOUSES:-}" ]] || return 0
+    local -a ips=()
+    read -r -a ips <<< "$LIGHTHOUSES"
+    (( ${#ips[@]} )) || return 0
+    local iface="${TUN:-nebula1}"
+    if ! command -v resolvectl >/dev/null 2>&1; then
+        warn "resolvectl (systemd-resolved) not found; enable mesh DNS manually:"
+        warn "  sudo resolvectl dns $iface ${ips[*]}"
+        warn "  sudo resolvectl domain $iface ~$DOMAIN"
+        return 0
+    fi
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        ip link show "$iface" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    if ! asroot resolvectl dns "$iface" "${ips[@]}"; then
+        warn "could not point $iface at ${ips[*]}; set it manually"
+        return 0
+    fi
+    asroot resolvectl domain "$iface" "~$DOMAIN" || warn "could not route ~$DOMAIN to $iface"
+    say "Mesh DNS: ~$DOMAIN -> ${ips[*]} via $iface"
+    say "The lighthouse only answers for hosts it has seen since it started."
+    if [[ -n "$SUDO" ]] || [[ "$(id -u)" -eq 0 ]]; then
+        install_resolved_hook "$iface" "$DOMAIN" "${ips[@]}"
+    else
+        say "Skipped the boot hook (user-owned install); reapply after reboot."
+    fi
+}
+
 # --- service ----------------------------------------------------------------
 if [[ "$NO_START" == "1" ]]; then
     say "Service start skipped (--no-start)"
+    if [[ "$NO_DNS" != "1" && -f "$BUNDLE_DIR/nebula-dns.conf" ]]; then
+        say "Mesh DNS not applied (the service was not started); re-run without --no-start."
+    fi
     print_next_steps
     say "Done. Start Nebula manually or with your service manager."
     exit 0
@@ -305,6 +418,8 @@ elif command -v systemctl >/dev/null 2>&1; then
             say "Started $SVC"
         else
             warn "could not start $SVC; run 'systemctl status $SVC' for details"
+            asroot journalctl -xeu "$SVC" --no-pager -n 12 2>/dev/null | sed 's/^/    /' || true
+            START_FAILED=1
         fi
     else
         warn "systemd unit '$SVC' not found; install Nebula's service unit first"
@@ -313,5 +428,13 @@ elif command -v systemctl >/dev/null 2>&1; then
     fi
 else
     warn "no systemd/launchd detected; start Nebula manually"
+fi
+
+if [[ "$NO_DNS" == "1" ]]; then
+    say "Mesh DNS setup skipped (--no-dns)"
+elif (( START_FAILED )); then
+    say "Mesh DNS not applied (the service did not start)."
+else
+    apply_bundle_dns
 fi
 print_next_steps

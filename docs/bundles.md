@@ -51,8 +51,10 @@ entry, and the choice is remembered in
 `~/.config/nebula-manager/bundle-dir`.
 
 The archive contains the cert, key, `ca.crt`, `config.yml.template`,
-**`install.sh`**, **`install.ps1`** and a `README.txt` with client instructions,
-and is written mode **0600** because it holds the private key.
+**`install.sh`**, **`install.ps1`**, a `README.txt` with client instructions and —
+when the mesh suffix and the lighthouse IPs are known — a `nebula-dns.conf`
+that lets the installer set up name resolution. The archive is written mode
+**0600** because it holds the private key.
 
 #### Self-contained installers
 
@@ -92,8 +94,16 @@ Both installers:
 - rewrite `/etc/nebula` in the template when `--dir` / `-Dir` is used;
 - set the private key mode `600` (Linux/macOS) or restrict it to
   `SYSTEM`+`Administrators` (Windows);
-- validate with `nebula -test` when the binary is available;
-- (re)start the service unless `--no-start` / `-NoStart` is given.
+- hand the files to the unit's `User=` when the service runs unprivileged, so a
+  mode-`600` key stays readable for Nebula;
+- validate with `nebula -test` (elevated when the config/key are root-owned, so
+  validation does not fail with `permission denied`);
+- configure **mesh DNS** on Linux from `nebula-dns.conf`:
+  `resolvectl dns <tun> <lighthouses>` and `resolvectl domain <tun> ~<suffix>`,
+  plus a boot-hook unit that reapplies it (`--no-dns` skips this; it is also
+  skipped when the service is not started or `resolvectl` is missing);
+- (re)start the service unless `--no-start` / `-NoStart` is given, printing the
+  last journal lines when the start fails.
 
 #### Sharing one-liners
 

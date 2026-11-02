@@ -144,4 +144,64 @@ else
     echo "SKIP: 'timeout' not available - hang regression not checked"
 fi
 
+# --- mesh DNS: the bundle carries a hint -------------------------------------
+cat > "$SANDBOX/local.yml" <<'YML'
+lighthouse:
+  am_lighthouse: false
+  interval: 5
+  hosts:
+    - "10.80.0.1"
+static_host_map:
+  "10.80.0.1": ["vpn.example:4545"]
+tun:
+  dev: nebula1
+YML
+mkdir -p "$SANDBOX/dnsbundles"
+dns_out="$(NEBULA_LOCAL_CONFIG="$SANDBOX/local.yml" \
+    pki_bundle_client_zip roamer.mesh "$SANDBOX/dnsbundles" "$keys" "" "" "" 2>&1)"
+dns_archive="$(printf '%s\n' "$dns_out" | tail -n1)"
+assert_file "bundle with DNS hint created" "$dns_archive"
+case "$dns_archive" in
+    *.zip)    assert_contains "bundle ships nebula-dns.conf" "$(unzip -l "$dns_archive" 2>/dev/null)" "nebula-dns.conf"
+              dns_body="$(unzip -p "$dns_archive" nebula-dns.conf 2>/dev/null || true)" ;;
+    *.tar.gz) assert_contains "bundle ships nebula-dns.conf" "$(tar -tzf "$dns_archive" 2>/dev/null)" "nebula-dns.conf"
+              dns_body="$(tar -xzOf "$dns_archive" nebula-dns.conf 2>/dev/null || true)" ;;
+    *)        dns_body="" ;;
+esac
+assert_contains "DNS hint carries the mesh suffix"   "$dns_body" "DOMAIN=mesh"
+assert_contains "DNS hint carries the lighthouse IP" "$dns_body" 'LIGHTHOUSES="10.80.0.1"'
+assert_contains "DNS hint carries the tun device"    "$dns_body" "TUN=nebula1"
+
+# --- mesh DNS: the installer applies it --------------------------------------
+cat > "$SANDBOX/bin/resolvectl" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${RESOLVECTL_LOG:?}"
+exit 0
+MOCK
+chmod +x "$SANDBOX/bin/resolvectl"
+cat > "$SANDBOX/bin/ip" <<'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+chmod +x "$SANDBOX/bin/ip"
+export RESOLVECTL_LOG="$SANDBOX/resolvectl.log"
+
+cat > "$unpack/nebula-dns.conf" <<'DNS'
+TUN=nebula1
+DOMAIN=test.mesh
+LIGHTHOUSES=10.80.0.1 10.80.0.2
+DNS
+: > "$RESOLVECTL_LOG"
+out="$(bash "$unpack/install.sh" --dir "$target" --yes 2>&1)"; rc=$?
+assert_eq "installer with DNS hint exits 0" "$rc" "0"
+assert_contains "mesh DNS servers applied" "$(cat "$RESOLVECTL_LOG")" "dns nebula1 10.80.0.1 10.80.0.2"
+assert_contains "mesh DNS suffix applied"  "$(cat "$RESOLVECTL_LOG")" "domain nebula1 ~test.mesh"
+assert_contains "installer reports mesh DNS" "$out" "Mesh DNS: ~test.mesh"
+
+: > "$RESOLVECTL_LOG"
+out="$(bash "$unpack/install.sh" --dir "$target" --yes --no-dns 2>&1)"; rc=$?
+assert_eq "--no-dns still succeeds" "$rc" "0"
+assert_empty_file "--no-dns leaves the resolver alone" "$RESOLVECTL_LOG"
+assert_contains "--no-dns is announced" "$out" "Mesh DNS setup skipped"
+
 harness_summary
