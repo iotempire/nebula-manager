@@ -122,4 +122,26 @@ assert_contains "tar bundle renders tar extraction" "$(cat "$SANDBOX/rendered-ta
 pki_render_bundle_readme "$tpl" "$SANDBOX/rendered-zip" "n" "x.zip" p u c
 assert_contains "zip bundle renders unzip extraction" "$(cat "$SANDBOX/rendered-zip")" "unzip -q"
 
+# --- regression: the default dir must not hang -------------------------------
+# The renderer used to replace "/etc/nebula" with itself in an endless loop, so
+# every default install stalled before touching anything.
+if command -v timeout >/dev/null 2>&1; then
+    out="$(timeout 20 bash "$unpack/install.sh" --certs-only --no-start --yes 2>&1)"; rc=$?
+    assert_eq "default /etc/nebula install does not hang" "$rc" "0"
+    assert_contains "default-dir install reports success" "$out" "Installed 'roamer.mesh'"
+    assert_contains "default-dir install finishes the --no-start path" "$out" "Service start skipped"
+
+    # A target that itself contains "/etc/nebula" must be substituted exactly
+    # once (the in-place loop kept re-expanding the inserted path).
+    mkdir -p "$SANDBOX/etc"
+    grow="$SANDBOX/etc/nebula"
+    out="$(timeout 20 bash "$unpack/install.sh" --dir "$grow" --no-start --yes 2>&1)"; rc=$?
+    assert_eq "nested target install exits 0" "$rc" "0"
+    assert_eq "old path replaced exactly once" \
+        "$(grep -m1 'ca:' "$grow/config.yml" | sed 's/^[[:space:]]*//')" \
+        "ca: $grow/ca.crt"
+else
+    echo "SKIP: 'timeout' not available - hang regression not checked"
+fi
+
 harness_summary

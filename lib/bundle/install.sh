@@ -108,11 +108,22 @@ RENDERED="$(mktemp)" || die "cannot create a temporary file"
 CLEANUP_FILES=("$RENDERED")
 cleanup() { rm -f "${CLEANUP_FILES[@]}"; }
 trap cleanup EXIT
-awk -v old="/etc/nebula" -v new="$DIR" '{
-    while ((i = index($0, old)) > 0)
-        $0 = substr($0, 1, i-1) new substr($0, i+length(old))
-    print
-}' "$TMPL" > "$RENDERED" || { rm -f "$RENDERED"; die "cannot render $TMPL"; }
+if [[ "$DIR" == "/etc/nebula" ]]; then
+    # The template already points at the default directory: nothing to rewrite.
+    cp "$TMPL" "$RENDERED" || { rm -f "$RENDERED"; die "cannot render $TMPL"; }
+else
+    # Substitute while consuming the line, so the loop always terminates - even
+    # when the new path contains the old one. (Replacing in place spun forever
+    # when old == new, which stalled every default /etc/nebula install.)
+    awk -v old="/etc/nebula" -v new="$DIR" '{
+        out = ""
+        while ((i = index($0, old)) > 0) {
+            out = out substr($0, 1, i-1) new
+            $0 = substr($0, i+length(old))
+        }
+        print out $0
+    }' "$TMPL" > "$RENDERED" || { rm -f "$RENDERED"; die "cannot render $TMPL"; }
+fi
 
 CONFIG="$DIR/config.yml"
 
@@ -209,11 +220,39 @@ if [[ -n "$NEBULA" ]]; then
     fi
 else
     say "nebula binary not found in PATH; skipped config validation"
+    NEED_BINARY=1
 fi
+
+# --- guidance when Nebula itself is not set up ------------------------------
+NEED_UNIT=0
+: "${NEED_BINARY:=0}"
+print_next_steps() {
+    (( NEED_BINARY || NEED_UNIT )) || return 0
+    local os; os="$(uname -s 2>/dev/null || echo unknown)"
+    printf '\n'
+    say "Next steps - Nebula is not fully set up on this host yet:"
+    if (( NEED_BINARY )); then
+        if [[ "$os" == "Darwin" ]]; then
+            say "  * Install Nebula:  brew install nebula"
+        else
+            say "  * Install the Nebula binary:"
+            say "      Debian/Ubuntu/Mint:  sudo apt install nebula"
+            say "      Fedora/RHEL:         sudo dnf install nebula"
+            say "      Arch/CachyOS:        sudo pacman -S nebula"
+            say "      Other:               https://github.com/slackhq/nebula/releases"
+        fi
+    fi
+    if (( NEED_UNIT )) && [[ "$os" != "Darwin" ]]; then
+        say "  * Install the service unit and start it:"
+        say "      sudo systemctl enable --now ${SVC:-nebula.service}"
+    fi
+    say "  Certificates and config are already in $DIR."
+}
 
 # --- service ----------------------------------------------------------------
 if [[ "$NO_START" == "1" ]]; then
     say "Service start skipped (--no-start)"
+    print_next_steps
     say "Done. Start Nebula manually or with your service manager."
     exit 0
 fi
@@ -270,7 +309,9 @@ elif command -v systemctl >/dev/null 2>&1; then
     else
         warn "systemd unit '$SVC' not found; install Nebula's service unit first"
         warn "files are installed - start Nebula manually once the unit exists"
+        NEED_UNIT=1
     fi
 else
     warn "no systemd/launchd detected; start Nebula manually"
 fi
+print_next_steps

@@ -353,9 +353,12 @@ _bundle_rebase_config() {
         return 0
     fi
     awk -v old="/etc/nebula" -v new="$target" '{
-        while ((i = index($0, old)) > 0)
-            $0 = substr($0, 1, i-1) new substr($0, i+length(old))
-        print
+        out = ""
+        while ((i = index($0, old)) > 0) {
+            out = out substr($0, 1, i-1) new
+            $0 = substr($0, i+length(old))
+        }
+        print out $0
     }' "$src"
 }
 
