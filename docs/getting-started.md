@@ -261,7 +261,7 @@ You can always point at any file with `--config`:
 | `use_icons` | Enable UI icons/symbols | `true` |
 | `disable_version_check` | Kept for compatibility; the Manager self-update is commented out in this fork | `false` |
 | `ignore_dependency_check` | Skip dependency verification | `false` |
-| `ignore_nebula_update` | Don't prompt about Nebula updates | `false` |
+| `ignore_nebula_update` | Kept for compatibility; the startup Nebula-update prompt is commented out | `false` |
 
 #### `[server.<name>]` keys
 

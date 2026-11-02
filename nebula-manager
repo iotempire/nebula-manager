@@ -114,9 +114,13 @@ top_header() {
     if check_nebula_installed; then
         LATEST_VERSION=$(get_latest_version)
         echo -e "$(show_status 'success') ${BOLD}${YELLOW}Nebula:${RESET} v$NEBULA_VERSION$([ "$NEBULA_VERSION" != "$LATEST_VERSION" ] && echo -e "${GREEN} ➜ ${RED}Update Available:${RESET} v$LATEST_VERSION${RESET}" || echo -e " ${GREEN}(Up to date)${RESET}")"
-        if [[ "$NEBULA_VERSION" != "$LATEST_VERSION" && "${IGNORE_NEBULA_UPDATE:-}" != "true" ]]; then
-            check_for_nebula_update
-        fi
+        # Automatic Nebula update prompt disabled in this fork: it blocks the
+        # TUI on a network round-trip, and the answer is better given
+        # deliberately. The header still flags "Update Available"; act on it
+        # with Maintenance > Update Nebula or `--auto-update-nebula`.
+        # if [[ "$NEBULA_VERSION" != "$LATEST_VERSION" && "${IGNORE_NEBULA_UPDATE:-}" != "true" ]]; then
+        #     check_for_nebula_update
+        # fi
         show_system_info
     else
         echo -e "$(show_status 'error') Nebula not installed..."

@@ -63,8 +63,10 @@ git rebase upstream/main  # replay our commits on top
 git push origin main
 ```
 
-Only the **Manager** is affected: the **Nebula binary** check and the
-auto-update scheduler (`--auto-update-nebula`) still work as before.
+Only the **Manager** is affected. The **Nebula binary** updater still works, but
+its automatic startup prompt is commented out as well — the header still shows
+`Update Available`, and you update deliberately from *Maintenance ▸ Update
+Nebula* or via the `--auto-update-nebula` scheduler.
 
 ### Repo resolution (used by `paths`, and by the dormant check)
 
