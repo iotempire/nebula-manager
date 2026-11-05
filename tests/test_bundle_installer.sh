@@ -204,4 +204,21 @@ assert_eq "--no-dns still succeeds" "$rc" "0"
 assert_empty_file "--no-dns leaves the resolver alone" "$RESOLVECTL_LOG"
 assert_contains "--no-dns is announced" "$out" "Mesh DNS setup skipped"
 
+# --- old nebula binary: actionable V2 guidance -------------------------------
+cat > "$SANDBOX/bin/nebula" <<'MOCK'
+#!/usr/bin/env bash
+case "${1:-}" in
+    --version|-version) echo "Version: 1.6.2"; exit 0 ;;
+esac
+echo 'ERRO Could not load client cert error="error while unmarshaling pki.cert: bytes did not contain a proper nebula certificate banner"' >&2
+exit 1
+MOCK
+chmod +x "$SANDBOX/bin/nebula"
+out="$(bash "$unpack/install.sh" --dir "$target" --yes --no-dns 2>&1)"; rc=$?
+assert_eq "install with an old nebula exits 0" "$rc" "0"
+assert_contains "old nebula is detected"        "$out" "older than v1.10"
+assert_contains "V2 requirement is explained"   "$out" "V2 certificate"
+assert_contains "upgrade hint is printed"       "$out" "Upgrade Nebula to v1.10+"
+rm -f "$SANDBOX/bin/nebula"
+
 harness_summary

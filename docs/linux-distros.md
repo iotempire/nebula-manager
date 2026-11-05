@@ -55,8 +55,10 @@ nebula-cert --version
 systemctl cat nebula
 ```
 
-> Ubuntu 24.04 ships Nebula **1.6.x** and Debian 13 (trixie) ships **1.9.x**.
-> For the newest release use the upstream tarball (see *Upstream binaries*).
+> ⚠️ **Nebula v1.10+ is required** — the certificate format this tool uses (V2)
+> cannot be read by older releases. Ubuntu 24.04 ships **1.6.x**, Debian 12
+> **1.6.1** and Debian 13 (trixie) **1.9.3** — all too old. Install the upstream
+> tarball (*Upstream binaries* below) instead of `apt install nebula`.
 
 ### 2. Install nebula-manager's tools
 

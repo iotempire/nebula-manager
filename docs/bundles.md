@@ -58,6 +58,12 @@ that lets the installer set up name resolution. The archive is written mode
 
 #### Self-contained installers
 
+> ⚠️ **The client needs Nebula v1.10 or newer.** Bundles carry **V2
+> certificates**, which older releases cannot read (`bytes did not contain a
+> proper nebula certificate banner`). Debian 12 ships 1.6.1 and Debian 13 ships
+> 1.9.3, so `apt install nebula` is *not* enough — `install.sh` detects this and
+> prints the release-tarball command.
+
 The bundle no longer needs nebula-manager on the client:
 
 ```text

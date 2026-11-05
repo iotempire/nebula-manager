@@ -28,6 +28,27 @@ say()  { printf '[install] %s\n' "$*"; }
 warn() { printf '[install] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 
+# --- version helpers --------------------------------------------------------
+nebula_version_of() {
+    local v=""
+    v="$("$1" --version 2>/dev/null)" || v="$("$1" -version 2>/dev/null)" || true
+    printf '%s\n' "$v" | sed -n 's/.*Version: *//p' | head -n1 | tr -d '[:space:]'
+}
+
+version_at_least() {  # $1 = have, $2 = want
+    [[ -n "$1" ]] || return 1
+    [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
+}
+
+nebula_release_arch() {
+    case "$(uname -m 2>/dev/null)" in
+        x86_64|amd64)  printf 'amd64' ;;
+        aarch64|arm64) printf 'arm64' ;;
+        armv7l|armv6l) printf 'arm' ;;
+        *)             printf '' ;;
+    esac
+}
+
 usage() {
     cat <<'EOF'
 Usage: sudo bash install.sh [options]
@@ -224,14 +245,20 @@ else
     say "  $NAME.crt, $NAME.key, ca.crt, config.yml"
 fi
 
-# --- validate ---------------------------------------------------------------
+# --- validation ---------------------------------------------------------------
 NEBULA=""
 if command -v nebula >/dev/null 2>&1; then
     NEBULA="$(command -v nebula)"
 elif [[ -x "$DIR/nebula" ]]; then
     NEBULA="$DIR/nebula"
 fi
+NEBULA_VER=""
 if [[ -n "$NEBULA" ]]; then
+    NEBULA_VER="$(nebula_version_of "$NEBULA")"
+    if [[ -n "$NEBULA_VER" ]] && ! version_at_least "$NEBULA_VER" "1.10"; then
+        NEED_UPGRADE=1
+        warn "nebula v$NEBULA_VER is older than v1.10: it cannot read V2 certificates."
+    fi
     if [[ -f "$CONFIG" ]]; then
         # A root-owned 600 key cannot be read as the invoking user; validate
         # with the same privilege used to install the files.
@@ -239,10 +266,17 @@ if [[ -n "$NEBULA" ]]; then
         if [[ -n "$SUDO" ]] && { [[ ! -r "$CONFIG" ]] || [[ ! -r "$DIR/$NAME.key" ]]; }; then
             VAL_CMD=( asroot "$NEBULA" )
         fi
-        if "${VAL_CMD[@]}" -test -config "$CONFIG"; then
+        VAL_OUT="$(mktemp)"; CLEANUP_FILES+=("$VAL_OUT")
+        if "${VAL_CMD[@]}" -test -config "$CONFIG" >"$VAL_OUT" 2>&1; then
+            cat "$VAL_OUT"
             say "Configuration validated with nebula -test"
         else
+            cat "$VAL_OUT" >&2
             warn "nebula -test reported a problem; check $CONFIG before starting the service"
+            if grep -q 'proper nebula certificate banner' "$VAL_OUT" 2>/dev/null; then
+                NEED_UPGRADE=1
+                warn "This 'nebula' cannot read the bundle's V2 certificate (v1.10+ needed)."
+            fi
         fi
     else
         say "No config.yml present; skipped validation"
@@ -256,25 +290,38 @@ fi
 NEED_UNIT=0
 START_FAILED=0
 : "${NEED_BINARY:=0}"
+: "${NEED_UPGRADE:=0}"
 print_next_steps() {
-    (( NEED_BINARY || NEED_UNIT )) || return 0
+    (( NEED_BINARY || NEED_UNIT || NEED_UPGRADE )) || return 0
     local os; os="$(uname -s 2>/dev/null || echo unknown)"
     printf '\n'
     say "Next steps - Nebula is not fully set up on this host yet:"
-    if (( NEED_BINARY )); then
+    if (( NEED_BINARY || NEED_UPGRADE )); then
+        local arch; arch="$(nebula_release_arch)"
         if [[ "$os" == "Darwin" ]]; then
-            say "  * Install Nebula:  brew install nebula"
+            if (( NEED_UPGRADE )); then
+                say "  * Upgrade Nebula to v1.10+ (V2 certificates):  brew upgrade nebula"
+            else
+                say "  * Install Nebula (v1.10+ for V2 certificates):  brew install nebula"
+            fi
+        elif [[ -n "$arch" ]]; then
+            if (( NEED_UPGRADE )); then
+                say "  * Upgrade Nebula to v1.10+ (V2 certificates need it):"
+            else
+                say "  * Install Nebula (v1.10+ is required for V2 certificates):"
+            fi
+            say "      curl -fsSL https://github.com/slackhq/nebula/releases/latest/download/nebula-linux-$arch.tar.gz \\"
+            say "        | sudo tar -xz -C /usr/local/bin nebula nebula-cert"
+            say "      Distribution packages are often older (Debian 12: 1.6.1, Debian 13: 1.9.3)."
         else
-            say "  * Install the Nebula binary:"
-            say "      Debian/Ubuntu/Mint:  sudo apt install nebula"
-            say "      Fedora/RHEL:         sudo dnf install nebula"
-            say "      Arch/CachyOS:        sudo pacman -S nebula"
-            say "      Other:               https://github.com/slackhq/nebula/releases"
+            say "  * Install/upgrade Nebula to v1.10+: https://github.com/slackhq/nebula/releases"
         fi
     fi
     if (( NEED_UNIT )) && [[ "$os" != "Darwin" ]]; then
         say "  * Install the service unit and start it:"
-        say "      sudo systemctl enable --now ${SVC:-nebula.service}"
+        say "      sudo curl -fsSL https://raw.githubusercontent.com/slackhq/nebula/master/examples/service_scripts/nebula.service \\"
+        say "        -o /etc/systemd/system/${SVC:-nebula.service}"
+        say "      sudo systemctl daemon-reload && sudo systemctl enable --now ${SVC:-nebula.service}"
     fi
     say "  Certificates and config are already in $DIR."
 }
@@ -335,9 +382,10 @@ apply_bundle_dns() {
     (( ${#ips[@]} )) || return 0
     local iface="${TUN:-nebula1}"
     if ! command -v resolvectl >/dev/null 2>&1; then
-        warn "resolvectl (systemd-resolved) not found; enable mesh DNS manually:"
-        warn "  sudo resolvectl dns $iface ${ips[*]}"
-        warn "  sudo resolvectl domain $iface ~$DOMAIN"
+        warn "resolvectl (systemd-resolved) not found; enable mesh DNS another way:"
+        warn "  * Debian/Ubuntu: sudo apt install systemd-resolved && sudo systemctl enable --now systemd-resolved"
+        warn "  * or add the mesh hostnames to /etc/hosts"
+        warn "  * or point your resolver at ${ips[0]} for ~$DOMAIN"
         return 0
     fi
     local i

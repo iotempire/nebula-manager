@@ -68,6 +68,11 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
 - [x] **Windows native bundle installer** (`install.ps1`) – elevation, key ACLs and
       `nebula.exe -service install/start` are implemented; a real-host run is
       tracked in the manual checklist below.
+- [ ] **Pre-1.10 client compatibility** – optionally create a v1 CA/certificates
+      (`nebula-cert ca -version 1`) for meshes that still contain hosts with old
+      distribution packages (Debian 12: 1.6.1, Debian 13: 1.9.3). Today those
+      hosts get upgrade instructions, and v2 certs fail with `bytes did not
+      contain a proper nebula certificate banner`.
 - [ ] Optional `nebula-cert` JSON health checks / richer diagnostics output.
 
 ### Manual platform confirmation (needed)

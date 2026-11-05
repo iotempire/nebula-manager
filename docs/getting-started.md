@@ -130,6 +130,20 @@ command if any are missing (skippable via `ignore_dependency_check` in the conf)
 **Required:** `gawk` (`awk`), `curl`, `findutils` (`find`), `grep`, `jq`, `sed`, `sudo`, `systemd` (`systemctl`), `tar`, `wget`, `coreutils` (`sha256sum`), `iputils-ping`
 **Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (fleet mass deployment without opening ports); `nc`/`netcat` (fast SSH port probing; falls back to bash `/dev/tcp`); `ssh` (fleet SSH push and probing)
 
+> ⚠️ **Nebula v1.10 or newer is required.** The academic edition signs **V2
+> certificates**; older Nebula releases reject them with `bytes did not contain a
+> proper nebula certificate banner`. Distribution packages lag behind: **Debian 12
+> (bookworm) ships 1.6.1 and Debian 13 (trixie) ships 1.9.3** — both too old. Use
+> the official release tarball on client and server hosts:
+>
+> ```bash
+> curl -fsSL https://github.com/slackhq/nebula/releases/latest/download/nebula-linux-amd64.tar.gz \
+>   | sudo tar -xz -C /usr/local/bin nebula nebula-cert
+> ```
+>
+> (`nebula-linux-arm64` on Raspberry Pi / 64-bit ARM.) `nebula --version` shows
+> the installed version.
+
 > 📖 Per-distribution manuals (Ubuntu/Debian/Mint, Fedora/RHEL, Arch/CachyOS,
 > including SELinux and firewall notes): **[Linux distribution guides](linux-distros.md)**.
 
