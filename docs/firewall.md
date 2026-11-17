@@ -55,7 +55,7 @@ certificate carries (usually a typo):
 ```text
 Nebula firewall: /etc/nebula/config.yml
 Inbound default:  drop
-Outbound default: accept
+Outbound default: drop
 
 Inbound rules (1):
   #0  any      any     groups [home] -> 3 cert(s) match

@@ -63,6 +63,8 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       only accepts `drop` and `reject`; `node_fw_render_policy permissive` and the
       `permissive` mode now render `drop` (the explicit allow-all rules do the
       rest), and `policy_validate` rejects any other action value. Tests updated.
+      `firewall explain` also reports `drop` (not `accept`) when
+      `outbound_action` is absent, matching Nebula's default-deny behaviour.
 - [x] **Document the lighthouse-outside-the-network warnings.** Explained in
       [operations.md ▸ Field notes](operations.md#-field-notes-debian-clients) and
       [dns.md](dns.md#-debian-enabling-systemd-resolved-can-break-dns): expected

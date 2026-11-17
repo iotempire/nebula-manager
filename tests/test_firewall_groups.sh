@@ -34,7 +34,6 @@ cfg="$SANDBOX/config.yml"
 cat > "$cfg" <<'YAML'
 firewall:
   inbound_action: drop
-  outbound_action: accept
   inbound:
     - port: any
       proto: any
@@ -146,7 +145,9 @@ assert_eq "template menu used any/any" "$(yq -r '.firewall.inbound[-1].port' "$c
 # --- explain ----------------------------------------------------------------
 explain="$(firewall_explain "$cfg" 2>&1)"
 assert_contains "explain: inbound default"  "$explain" "Inbound default:  drop"
-assert_contains "explain: outbound default" "$explain" "Outbound default: accept"
+# outbound_action is absent in the fixture: Nebula's default is drop, and the
+# summary must report what the node actually does.
+assert_contains "explain: outbound default" "$explain" "Outbound default: drop"
 assert_contains "explain: group rule"       "$explain" "groups [home]"
 assert_contains "explain: match count"      "$explain" "2 cert(s) match"
 assert_contains "explain: host any is any peer" "$explain" "any peer"

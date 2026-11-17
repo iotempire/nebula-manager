@@ -2327,7 +2327,7 @@ firewall_explain() {
 
     printf 'Nebula firewall: %s\n' "$config"
     printf 'Inbound default:  %s\n' "$(yq -r '.firewall.inbound_action  // "drop"'   "$readable")"
-    printf 'Outbound default: %s\n' "$(yq -r '.firewall.outbound_action // "accept"' "$readable")"
+    printf 'Outbound default: %s\n' "$(yq -r '.firewall.outbound_action // "drop"' "$readable")"
     _firewall_explain_direction "$readable" inbound
     _firewall_explain_direction "$readable" outbound
 
