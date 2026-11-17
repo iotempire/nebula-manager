@@ -51,6 +51,14 @@ err="$("$NM" sign 2>&1)"; rc=$?
 assert_eq "sign without args exits 2" "$rc" "2"
 assert_contains "sign prints usage" "$err" "Usage:"
 
+# A flag is never a certificate name (a bare `sign --help` used to sign "--help").
+out="$("$NM" sign --help 2>&1)"; rc=$?
+assert_eq "sign --help exits 0" "$rc" "0"
+assert_contains "sign --help prints usage" "$out" "Usage: nebula-manager sign"
+out="$("$NM" sign --bogus 2>&1)"; rc=$?
+assert_eq "sign rejects unknown options" "$rc" "2"
+assert_contains "sign names the unknown option" "$out" "Unknown option for 'sign'"
+
 err="$("$NM" ca 2>&1)"; rc=$?
 assert_eq "ca without --name exits 2" "$rc" "2"
 

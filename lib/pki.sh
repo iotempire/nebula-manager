@@ -525,6 +525,14 @@ pki_sign() {
     if (( overwrite )); then
         debug_explain "Existing certificate/key files are replaced; the snapshot above keeps the old ones."
     fi
+    local foreign_nets
+    foreign_nets="$(pki_foreign_networks "$ip" "$cert_dir")"
+    if [[ -n "$foreign_nets" ]]; then
+        log_warn "$ip is outside the overlay network(s) already in use:"
+        printf '    %s\n' "$(printf '%s' "$foreign_nets" | tr '\n' ' ')" >&2
+        log_warn "Nebula only routes between hosts that share a network; other nodes will not reach this one over L3."
+        log_warn "Prefer an address inside an existing network unless you add routes on every peer."
+    fi
     local tmpdir out_tmp key_tmp
     tmpdir="$(mktemp -d)" || return 1
     out_tmp="$tmpdir/$name.crt"
@@ -704,6 +712,61 @@ _ip4_to_int() {
 _int_to_ip4() {
     local n="$1"
     printf '%s.%s.%s.%s' "$(( (n>>24)&255 ))" "$(( (n>>16)&255 ))" "$(( (n>>8)&255 ))" "$(( n&255 ))"
+}
+
+# _pki_net_of <ip[/prefix]> -> "<network>/<prefix>" (no /prefix means /24)
+_pki_net_of() {
+    local ip="$1" addr prefix ipint mask
+    addr="${ip%%/*}"; prefix="${ip#*/}"
+    [[ "$prefix" == "$ip" ]] && prefix=24
+    [[ "$prefix" =~ ^[0-9]+$ ]] || prefix=24
+    [[ "$addr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 0
+    ipint="$(_ip4_to_int "$addr")"
+    mask=$(( prefix == 0 ? 0 : (0xFFFFFFFF << (32-prefix)) & 0xFFFFFFFF ))
+    printf '%s/%s' "$(_int_to_ip4 "$(( ipint & mask ))")" "$prefix"
+}
+
+# cert_network_list <cert_dir> : distinct overlay networks among non-CA certs,
+# one "<network>/<prefix>" per line, most used first.
+cert_network_list() {
+    local cert_dir="$1" bin bp
+    bin="$(pki_cert_bin 2>/dev/null)" || return 0
+    bp="$(dirname "$bin")"
+    local -A counts=()
+    local cert json e net
+    for cert in "$cert_dir"/*.crt; do
+        [[ -f "$cert" ]] || continue
+        json="$(nebula_cert_json "$bp" "$cert" 2>/dev/null)" || continue
+        [[ "$(jq -r '.details.isCa // false' <<<"$json" 2>/dev/null)" == "true" ]] && continue
+        while IFS= read -r e; do
+            [[ -n "$e" ]] || continue
+            net="$(_pki_net_of "$e")"
+            [[ -n "$net" ]] || continue
+            counts["$net"]=$(( ${counts["$net"]:-0} + 1 ))
+        done < <(jq -r '.details.ips[]? // empty' <<<"$json" 2>/dev/null)
+    done
+    local k
+    for k in "${!counts[@]}"; do printf '%s\t%s\n' "$k" "${counts[$k]}"; done \
+        | sort -t$'\t' -k2,2nr -k1,1 | cut -f1
+}
+
+# pki_foreign_networks <ip[/prefix]> <cert_dir> : prints the networks already in
+# use when <ip> belongs to none of them; prints nothing when it matches or when
+# the workspace has no client certificates yet.
+#
+# Nebula is layer 3: hosts only reach each other when their certificate
+# networks overlap (the kernel route to the tun covers your own subnet only).
+pki_foreign_networks() {
+    local ip="$1" cert_dir="$2" want net
+    want="$(_pki_net_of "$ip")"
+    [[ -n "$want" ]] || return 0
+    local -a nets=()
+    mapfile -t nets < <(cert_network_list "$cert_dir")
+    (( ${#nets[@]} )) || return 0
+    for net in "${nets[@]}"; do
+        [[ "$net" == "$want" ]] && return 0
+    done
+    printf '%s\n' "${nets[@]}"
 }
 
 # cert_domain_list <cert_dir> : distinct domains among non-CA cert names, one
@@ -892,7 +955,20 @@ generate_nebula_cert() {
                     break
                 fi
             done
-            [[ "$ip_taken" == false ]] && break
+            if [[ "$ip_taken" == false ]]; then
+                local foreign_nets
+                foreign_nets="$(pki_foreign_networks "$cert_gen_ip" "$cert_dir")"
+                if [[ -n "$foreign_nets" ]]; then
+                    log_warn "$cert_gen_ip is outside the overlay network(s) already in use:"
+                    printf '    %s\n' "$(printf '%s' "$foreign_nets" | tr '\n' ' ')" >&2
+                    log_warn "Nebula only routes between hosts that share a network; other nodes will not reach this node over L3."
+                    log_warn "Use the suggested address (same network) unless you route between networks deliberately."
+                    if [[ -t 0 ]] && ! ui_yesno "Different overlay network" "Continue with $cert_gen_ip anyway?"; then
+                        continue
+                    fi
+                fi
+                break
+            fi
         else
             log_error "Invalid IP address. Please enter a valid IP (e.g., 192.168.222.16/24)."
         fi
@@ -3960,6 +4036,16 @@ pki_sign_cli() {
             --in-pub) shift; in_pub="$1" ;;
             --qr|--out-qr) shift; qr="$1" ;;
             --) shift; break ;;
+            -h|--help)
+                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--cert-dir DIR]\n'
+                return 0 ;;
+            -*)
+                # Never treat an unknown flag as a certificate name: a bare
+                # `sign --help` used to sign a certificate literally named
+                # "--help".
+                log_error "Unknown option for 'sign': $1"
+                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--cert-dir DIR]\n' >&2
+                return 2 ;;
             *)
                 if [[ -z "$name" ]]; then name="$1"; name_given=1
                 elif [[ -z "$ip" ]]; then ip="$1"

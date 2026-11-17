@@ -53,6 +53,13 @@ the TUI offers to append it: with **one** domain it asks for confirmation; with
 `nebula-manager sign --name bare` only prints the same hint — it never renames
 silently.
 
+If you type an **IP in a network that no existing certificate uses** (say
+`10.100.1.11/24` while the rest of the mesh is `10.100.0.0/24`), the tool warns;
+the TUI asks before continuing, and the CLI prints the same warning without
+blocking. Nebula is layer 3: the tun route only covers the certificate's own
+network, so the other nodes cannot reach that host without extra routes. Accept
+the suggested address unless you deliberately route between overlay networks.
+
 ```
 [?] Enter the certificate name [theprof-framework.theprof.mesh]:
 [?] Enter the IP address [10.100.0.4/24]:
