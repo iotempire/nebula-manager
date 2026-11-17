@@ -66,6 +66,20 @@ Limitations: the lighthouse only answers for hosts it has seen since it started;
 automatic client setup requires `systemd-resolved` (`resolvectl`). Without it,
 configure the lighthouse overlay IP as DNS for the Nebula interface manually.
 
+### ⚠️ Debian: enabling `systemd-resolved` can break DNS
+
+`apt install systemd-resolved` repoints `/etc/resolv.conf` at the stub
+(`127.0.0.53`). If nothing configures an upstream server for it, every lookup
+fails — including Nebula's `static_host_map` hostname resolution, which shows up
+as `DNS resolution failed for static_map host … server misbehaving` and a tunnel
+that never handshakes.
+
+Before relying on it, check `resolvectl status` (a DNS server must be listed) or
+set `DNS=` in `/etc/systemd/resolved.conf` and restart the unit. On servers that
+do not manage DNS dynamically, adding the handful of mesh names to `/etc/hosts`
+is the safer option. The bundle installer therefore only touches the resolver
+when `systemd-resolved` is installed **and running**.
+
 ---
 
 ## Where to next?

@@ -51,6 +51,22 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
 - [ ] **Real-network confirmation for fleet** – run `fleet croc` between two
       machines over croc's relay (including behind eduroam/NAT) and run
       `fleet ssh` against a node with key auth + passwordless sudo.
+- [x] **Linux bundle installer provides the systemd unit.** Field report
+      2026-11-17 (Debian, release tarball): `install.sh` now writes
+      `/etc/systemd/system/<unit>` with the detected `ExecStart` and the installed
+      config path when the package shipped no unit, runs `daemon-reload` and
+      `enable --now` (`--no-unit` opts out, `NEBULA_UNIT_DIR` overrides the
+      directory). It can also install/upgrade Nebula itself (`--install-nebula`).
+- [ ] **`import --bundle` / `fleet ssh` need the same unit check** – both still
+      assume a `nebula.service` exists on the target.
+- [x] **Never emit `firewall.inbound_action`/`outbound_action: accept`.** Nebula
+      only accepts `drop` and `reject`; `node_fw_render_policy permissive` and the
+      `permissive` mode now render `drop` (the explicit allow-all rules do the
+      rest), and `policy_validate` rejects any other action value. Tests updated.
+- [x] **Document the lighthouse-outside-the-network warnings.** Explained in
+      [operations.md ▸ Field notes](operations.md#-field-notes-debian-clients) and
+      [dns.md](dns.md#-debian-enabling-systemd-resolved-can-break-dns): expected
+      when the lighthouse is in a different overlay subnet; discovery still works.
 - [ ] **Better menu hierarchy** – revisit the top-level grouping once the fleet
       features land (the current rename to *Instances* / *Instance Settings* /
       *Updates & Install* / *Manager Setup* is the surgical first step):

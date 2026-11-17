@@ -23,6 +23,9 @@ ASSUME_YES="${NEBULA_INSTALL_YES:-0}"
 NO_START=0
 CERTS_ONLY=0
 NO_DNS=0
+NO_UNIT=0
+INSTALL_NEBULA="${NEBULA_INSTALL_NEBULA:-0}"
+NEBULA_UNIT_DIR="${NEBULA_UNIT_DIR:-/etc/systemd/system}"
 
 say()  { printf '[install] %s\n' "$*"; }
 warn() { printf '[install] WARNING: %s\n' "$*" >&2; }
@@ -49,6 +52,101 @@ nebula_release_arch() {
     esac
 }
 
+# Download and install Nebula from the official release (needs working DNS).
+install_nebula_binary() {
+    local arch; arch="$(nebula_release_arch)"
+    if [[ -z "$arch" ]]; then
+        warn "unsupported architecture ($(uname -m 2>/dev/null)); install Nebula manually"
+        return 1
+    fi
+    local url="https://github.com/slackhq/nebula/releases/latest/download/nebula-linux-$arch.tar.gz"
+    local tmp; tmp="$(mktemp -d)"
+    say "Downloading $url"
+    if ! curl -fsSL "$url" -o "$tmp/nebula.tar.gz"; then
+        warn "download failed (check DNS/network, or install Nebula manually)"
+        rm -rf "$tmp"; return 1
+    fi
+    if ! tar -xzf "$tmp/nebula.tar.gz" -C "$tmp" nebula nebula-cert; then
+        warn "could not extract the Nebula archive"
+        rm -rf "$tmp"; return 1
+    fi
+    if ! asroot cp "$tmp/nebula" "$tmp/nebula-cert" /usr/local/bin/; then
+        warn "could not install the binaries into /usr/local/bin"
+        rm -rf "$tmp"; return 1
+    fi
+    asroot chmod 755 /usr/local/bin/nebula /usr/local/bin/nebula-cert 2>/dev/null || true
+    rm -rf "$tmp"
+    hash -r 2>/dev/null || true
+    NEBULA="/usr/local/bin/nebula"
+    NEBULA_VER="$(nebula_version_of "$NEBULA")"
+    say "Installed Nebula${NEBULA_VER:+ v$NEBULA_VER} into /usr/local/bin"
+    NEED_BINARY=0
+    NEED_UPGRADE=0
+    if [[ -n "$NEBULA_VER" ]] && ! version_at_least "$NEBULA_VER" "1.10"; then
+        NEED_UPGRADE=1
+        warn "the installed Nebula (v$NEBULA_VER) is still older than v1.10"
+    fi
+}
+
+# systemd-resolved present and running? Installing it is not harmless: it can
+# repoint /etc/resolv.conf at a stub with no upstream, which breaks all DNS.
+resolved_ok() {
+    command -v resolvectl >/dev/null 2>&1 || return 1
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl is-active --quiet systemd-resolved 2>/dev/null || return 1
+    fi
+    return 0
+}
+
+# Warn when a static_host_map hostname does not resolve: Nebula then logs
+# "DNS resolution failed for static_map host" and the tunnel never comes up.
+check_lighthouse_hosts() {
+    [[ -n "$LIGHTHOUSE_HOSTS" ]] || return 0
+    command -v getent >/dev/null 2>&1 || return 0
+    local h
+    for h in $LIGHTHOUSE_HOSTS; do
+        getent hosts "$h" >/dev/null 2>&1 && continue
+        RESOLVE_FAILED=1
+        warn "cannot resolve the lighthouse hostname '$h'."
+        warn "Nebula would log 'DNS resolution failed for static_map host' and never connect."
+        warn "  fix the system resolver, or add '<public-ip> $h' to /etc/hosts."
+    done
+}
+
+# Write a minimal unit with the binary/config paths we actually installed.
+write_service_unit() {
+    if [[ -z "$NEBULA" ]]; then
+        warn "cannot write a service unit without a nebula binary"
+        return 1
+    fi
+    local dest="$NEBULA_UNIT_DIR/$SVC" tmp
+    tmp="$(mktemp)"
+    {
+        printf '[Unit]\n'
+        printf 'Description=Nebula overlay networking tool\n'
+        printf 'Wants=network-online.target nss-lookup.target time-sync.target\n'
+        printf 'After=network-online.target\n\n'
+        printf '[Service]\n'
+        printf 'Type=simple\n'
+        printf 'ExecStart=%s -config %s\n' "$NEBULA" "$CONFIG"
+        printf 'ExecReload=/bin/kill -HUP $MAINPID\n'
+        printf 'Restart=always\n'
+        printf 'RestartSec=5\n'
+        printf 'SyslogIdentifier=nebula\n\n'
+        printf '[Install]\n'
+        printf 'WantedBy=multi-user.target\n'
+    } > "$tmp"
+    if ! asroot cp "$tmp" "$dest"; then
+        rm -f "$tmp"
+        warn "could not write $dest"
+        return 1
+    fi
+    rm -f "$tmp"
+    asroot chmod 644 "$dest" 2>/dev/null || true
+    asroot systemctl daemon-reload || { warn "systemctl daemon-reload failed"; return 1; }
+    say "Wrote $dest (ExecStart=$NEBULA -config $CONFIG)"
+}
+
 usage() {
     cat <<'EOF'
 Usage: sudo bash install.sh [options]
@@ -60,6 +158,8 @@ Options:
       --certs-only     Install/refresh only cert/key/CA; keep any config.yml
       --no-start       Install files only; do not (re)start the service
       --no-dns         Do not configure systemd-resolved (mesh DNS)
+      --no-unit        Do not write a systemd unit when none exists
+      --install-nebula Install/upgrade Nebula (v1.10+) from the official release
   -h, --help           This help
 
 The archive contains a private key: transfer it over a trusted channel and
@@ -77,6 +177,8 @@ while (( $# )); do
         --certs-only)   CERTS_ONLY=1; shift ;;
         --no-start)     NO_START=1; shift ;;
         --no-dns)       NO_DNS=1; shift ;;
+        --no-unit)      NO_UNIT=1; shift ;;
+        --install-nebula) INSTALL_NEBULA=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         *)              warn "Unknown option: $1"; usage >&2; exit 2 ;;
     esac
@@ -135,6 +237,21 @@ for c in "$BUNDLE_DIR/config.yml.template" "$BUNDLE_DIR/config.yml"; do
     [[ -f "$c" ]] && { TMPL="$c"; break; }
 done
 [[ -n "$TMPL" ]] || die "config.yml.template / config.yml not found in $BUNDLE_DIR"
+
+# --- bundle metadata (mesh DNS + lighthouse hostnames) ----------------------
+BUNDLE_DNS_FILE="$BUNDLE_DIR/nebula-dns.conf"
+TUN=""; DOMAIN=""; LIGHTHOUSES=""; LIGHTHOUSE_HOSTS=""
+if [[ -f "$BUNDLE_DNS_FILE" ]]; then
+    while IFS='=' read -r _k _v; do
+        _v="${_v%\"}"; _v="${_v#\"}"
+        case "$_k" in
+            TUN)              TUN="$_v" ;;
+            DOMAIN)           DOMAIN="$_v" ;;
+            LIGHTHOUSES)      LIGHTHOUSES="$_v" ;;
+            LIGHTHOUSE_HOSTS) LIGHTHOUSE_HOSTS="$_v" ;;
+        esac
+    done < "$BUNDLE_DNS_FILE"
+fi
 
 # --- render the config for the chosen directory -----------------------------
 RENDERED="$(mktemp)" || die "cannot create a temporary file"
@@ -246,11 +363,16 @@ else
 fi
 
 # --- validation ---------------------------------------------------------------
+NEED_BINARY=0
+NEED_UPGRADE=0
+RESOLVE_FAILED=0
 NEBULA=""
 if command -v nebula >/dev/null 2>&1; then
     NEBULA="$(command -v nebula)"
 elif [[ -x "$DIR/nebula" ]]; then
     NEBULA="$DIR/nebula"
+else
+    NEED_BINARY=1
 fi
 NEBULA_VER=""
 if [[ -n "$NEBULA" ]]; then
@@ -259,6 +381,20 @@ if [[ -n "$NEBULA" ]]; then
         NEED_UPGRADE=1
         warn "nebula v$NEBULA_VER is older than v1.10: it cannot read V2 certificates."
     fi
+fi
+
+# Offer to fix a missing or too-old binary: the bundled certificates are V2.
+if (( NEED_BINARY || NEED_UPGRADE )); then
+    if [[ "$INSTALL_NEBULA" == "1" ]]; then
+        install_nebula_binary || true
+    elif [[ -t 0 ]]; then
+        printf '[install] Install/upgrade Nebula (v1.10+) from the official release now? [y/N] '
+        read -r _ans || _ans=""
+        case "$_ans" in [yY]*) install_nebula_binary || true ;; esac
+    fi
+fi
+
+if [[ -n "$NEBULA" ]]; then
     if [[ -f "$CONFIG" ]]; then
         # A root-owned 600 key cannot be read as the invoking user; validate
         # with the same privilege used to install the files.
@@ -283,8 +419,9 @@ if [[ -n "$NEBULA" ]]; then
     fi
 else
     say "nebula binary not found in PATH; skipped config validation"
-    NEED_BINARY=1
 fi
+
+check_lighthouse_hosts
 
 # --- guidance when Nebula itself is not set up ------------------------------
 NEED_UNIT=0
@@ -292,7 +429,7 @@ START_FAILED=0
 : "${NEED_BINARY:=0}"
 : "${NEED_UPGRADE:=0}"
 print_next_steps() {
-    (( NEED_BINARY || NEED_UNIT || NEED_UPGRADE )) || return 0
+    (( NEED_BINARY || NEED_UNIT || NEED_UPGRADE || RESOLVE_FAILED )) || return 0
     local os; os="$(uname -s 2>/dev/null || echo unknown)"
     printf '\n'
     say "Next steps - Nebula is not fully set up on this host yet:"
@@ -322,6 +459,10 @@ print_next_steps() {
         say "      sudo curl -fsSL https://raw.githubusercontent.com/slackhq/nebula/master/examples/service_scripts/nebula.service \\"
         say "        -o /etc/systemd/system/${SVC:-nebula.service}"
         say "      sudo systemctl daemon-reload && sudo systemctl enable --now ${SVC:-nebula.service}"
+    fi
+    if (( RESOLVE_FAILED )); then
+        say "  * The lighthouse hostname does not resolve, so the tunnel cannot come up:"
+        say "      repair DNS, or add \"<public-ip> $LIGHTHOUSE_HOSTS\" to /etc/hosts."
     fi
     say "  Certificates and config are already in $DIR."
 }
@@ -363,28 +504,17 @@ install_resolved_hook() {
 }
 
 apply_bundle_dns() {
-    local f="$BUNDLE_DIR/nebula-dns.conf"
-    [[ -f "$f" ]] || return 0
+    [[ -f "$BUNDLE_DNS_FILE" ]] || return 0
     [[ "$(uname -s 2>/dev/null)" == "Linux" ]] || return 0
-    local TUN="" DOMAIN="" LIGHTHOUSES=""
-    local k v
-    while IFS='=' read -r k v; do
-        v="${v%\"}"; v="${v#\"}"
-        case "$k" in
-            TUN)         TUN="$v" ;;
-            DOMAIN)      DOMAIN="$v" ;;
-            LIGHTHOUSES) LIGHTHOUSES="$v" ;;
-        esac
-    done < "$f"
-    [[ -n "${DOMAIN:-}" && -n "${LIGHTHOUSES:-}" ]] || return 0
+    [[ -n "$DOMAIN" && -n "$LIGHTHOUSES" ]] || return 0
     local -a ips=()
     read -r -a ips <<< "$LIGHTHOUSES"
     (( ${#ips[@]} )) || return 0
     local iface="${TUN:-nebula1}"
-    if ! command -v resolvectl >/dev/null 2>&1; then
-        warn "resolvectl (systemd-resolved) not found; enable mesh DNS another way:"
-        warn "  * Debian/Ubuntu: sudo apt install systemd-resolved && sudo systemctl enable --now systemd-resolved"
-        warn "  * or add the mesh hostnames to /etc/hosts"
+    if ! resolved_ok; then
+        warn "systemd-resolved is not available or not running; mesh DNS not configured."
+        warn "  * safest on servers: add the mesh hostnames to /etc/hosts"
+        warn "  * or install/configure systemd-resolved (see docs/dns.md) and re-run"
         warn "  * or point your resolver at ${ips[0]} for ~$DOMAIN"
         return 0
     fi
@@ -466,6 +596,14 @@ elif command -v systemctl >/dev/null 2>&1; then
             say "Started $SVC"
         else
             warn "could not start $SVC; run 'systemctl status $SVC' for details"
+            asroot journalctl -xeu "$SVC" --no-pager -n 12 2>/dev/null | sed 's/^/    /' || true
+            START_FAILED=1
+        fi
+    elif [[ "$NO_UNIT" != "1" ]] && write_service_unit; then
+        if asroot systemctl enable --now "$SVC"; then
+            say "Enabled and started $SVC"
+        else
+            warn "could not start $SVC after writing the unit"
             asroot journalctl -xeu "$SVC" --no-pager -n 12 2>/dev/null | sed 's/^/    /' || true
             START_FAILED=1
         fi

@@ -83,6 +83,16 @@ policy_validate() {
         log_error "$file: 'firewall.outbound' must be a list."
         return 1
     fi
+    # Nebula rejects anything but 'drop'/'reject' (and logs a warning, then
+    # silently defaults to drop), so catch it before it ships.
+    local act
+    for act in inbound_action outbound_action; do
+        if ! jq -e --arg k "$act" '(.[$k] // "drop") as $v | ($v == "drop" or $v == "reject")' \
+            <<<"$json" >/dev/null 2>&1; then
+            log_error "$file: firewall.$act must be 'drop' or 'reject' (got: $(jq -r --arg k "$act" '.[$k] // "-"' <<<"$json"))."
+            return 1
+        fi
+    done
     return 0
 }
 
@@ -317,10 +327,12 @@ node_fw_render_policy() {
     f="$(mktemp)" || return 1
     case "$mode" in
         permissive)
+            # Nebula only accepts 'drop' and 'reject' as actions; the explicit
+            # allow-all rules below do the permissive part.
             cat > "$f" <<'EOF'
 firewall:
-  inbound_action: accept
-  outbound_action: accept
+  inbound_action: drop
+  outbound_action: drop
   inbound:
     - port: any
       proto: any

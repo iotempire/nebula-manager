@@ -132,7 +132,7 @@ if command -v unzip >/dev/null 2>&1; then
     unzip -p "$SANDBOX/out2/node1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/fromzip2.yml"
     if command -v yq >/dev/null 2>&1; then
         assert_eq "override bundle carries the permissive firewall" \
-            "$(yq -r '.firewall.inbound_action' "$SANDBOX/fromzip2.yml" 2>/dev/null)" "accept"
+            "$(yq -r '.firewall.inbound_action' "$SANDBOX/fromzip2.yml" 2>/dev/null)" "drop"
     fi
 fi
 

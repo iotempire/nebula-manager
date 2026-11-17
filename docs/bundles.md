@@ -104,10 +104,18 @@ Both installers:
   mode-`600` key stays readable for Nebula;
 - validate with `nebula -test` (elevated when the config/key are root-owned, so
   validation does not fail with `permission denied`);
-- configure **mesh DNS** on Linux from `nebula-dns.conf`:
-  `resolvectl dns <tun> <lighthouses>` and `resolvectl domain <tun> ~<suffix>`,
-  plus a boot-hook unit that reapplies it (`--no-dns` skips this; it is also
-  skipped when the service is not started or `resolvectl` is missing);
+- **write a systemd unit when none exists**, using the detected binary and the
+  installed `config.yml` path, then `daemon-reload` + `enable --now`
+  (`--no-unit` opts out; the unit directory can be overridden with
+  `NEBULA_UNIT_DIR`);
+- optionally **install/upgrade Nebula** from the official release when the local
+  binary is missing or older than v1.10 (`--install-nebula`, or answer the prompt; validation
+  is re-run afterwards);
+- configure **mesh DNS** on Linux from `nebula-dns.conf` only when
+  `systemd-resolved` is installed **and running**: `resolvectl dns <tun> …` and
+  `resolvectl domain <tun> ~<suffix>`, plus a boot-hook unit (`--no-dns` skips
+  this); without resolved it suggests `/etc/hosts` instead of installing a
+  resolver that could break host DNS;
 - (re)start the service unless `--no-start` / `-NoStart` is given, printing the
   last journal lines when the start fails.
 

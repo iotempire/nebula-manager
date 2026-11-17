@@ -50,8 +50,8 @@ rm -f "$state"
 
 # --- rendered profiles ------------------------------------------------------
 p="$(node_fw_render_policy permissive)"
-assert_contains "permissive allows inbound"  "$(cat "$p")" "inbound_action: accept"
-assert_contains "permissive allows outbound" "$(cat "$p")" "outbound_action: accept"
+assert_contains "permissive allows inbound"  "$(cat "$p")" "inbound_action: drop"
+assert_contains "permissive allows outbound" "$(cat "$p")" "outbound_action: drop"
 rm -f "$p"
 p="$(node_fw_render_policy default)"
 assert_contains "default is an empty firewall block" "$(cat "$p")" "firewall: {}"
@@ -61,7 +61,7 @@ rm -f "$p"
 p="$(node_fw_render_policy permissive)"
 pki_write_client_config "$SANDBOX/client.yml" alpha.mesh "$keys" "$p" >/dev/null 2>&1
 assert_contains "client template carries the rendered firewall" \
-    "$(cat "$SANDBOX/client.yml")" "inbound_action: accept"
+    "$(cat "$SANDBOX/client.yml")" "inbound_action: drop"
 rm -f "$p"
 
 # A rendered profile can be embedded in a full bundle.

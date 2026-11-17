@@ -64,6 +64,7 @@ target="$SANDBOX/client"
 cat > "$SANDBOX/bin/systemctl" <<'MOCK'
 #!/usr/bin/env bash
 echo "$*" >> "${SYSTEMCTL_LOG:?}"
+if [[ "${SYSTEMCTL_EMPTY:-0}" == "1" && "${1:-}" == "cat" ]]; then exit 1; fi
 exit 0
 MOCK
 chmod +x "$SANDBOX/bin/systemctl"
@@ -171,6 +172,7 @@ esac
 assert_contains "DNS hint carries the mesh suffix"   "$dns_body" "DOMAIN=mesh"
 assert_contains "DNS hint carries the lighthouse IP" "$dns_body" 'LIGHTHOUSES="10.80.0.1"'
 assert_contains "DNS hint carries the tun device"    "$dns_body" "TUN=nebula1"
+assert_contains "DNS hint carries the lighthouse hostname" "$dns_body" 'LIGHTHOUSE_HOSTS="vpn.example"'
 
 # --- mesh DNS: the installer applies it --------------------------------------
 cat > "$SANDBOX/bin/resolvectl" <<'MOCK'
@@ -203,6 +205,64 @@ out="$(bash "$unpack/install.sh" --dir "$target" --yes --no-dns 2>&1)"; rc=$?
 assert_eq "--no-dns still succeeds" "$rc" "0"
 assert_empty_file "--no-dns leaves the resolver alone" "$RESOLVECTL_LOG"
 assert_contains "--no-dns is announced" "$out" "Mesh DNS setup skipped"
+
+# --- an unresolvable socket hostname is reported -----------------------------
+cat > "$unpack/nebula-dns.conf" <<'DNS'
+TUN=nebula1
+DOMAIN=test.mesh
+LIGHTHOUSES=10.80.0.1
+LIGHTHOUSE_HOSTS=unresolvable.invalid
+DNS
+cat > "$SANDBOX/bin/getent" <<'MOCK'
+#!/usr/bin/env bash
+case "${2:-}" in
+    unresolvable.invalid) exit 2 ;;
+esac
+exit 0
+MOCK
+chmod +x "$SANDBOX/bin/getent"
+out="$(bash "$unpack/install.sh" --dir "$target" --yes --no-dns 2>&1)"; rc=$?
+assert_eq "unresolvable lighthouse still installs" "$rc" "0"
+assert_contains "installer names the unresolvable host" "$out" "cannot resolve the lighthouse hostname 'unresolvable.invalid'"
+assert_contains "installer explains the tunnel impact" "$out" "never connect"
+assert_contains "next steps suggest /etc/hosts" "$out" "/etc/hosts"
+rm -f "$SANDBOX/bin/getent"
+# Restore a plain hint for the following tests.
+cat > "$unpack/nebula-dns.conf" <<'DNS'
+TUN=nebula1
+DOMAIN=test.mesh
+LIGHTHOUSES=10.80.0.1 10.80.0.2
+DNS
+
+# --- a missing systemd unit is written by the installer ---------------------
+cat > "$SANDBOX/bin/nebula" <<'MOCK'
+#!/usr/bin/env bash
+case "${1:-}" in
+    --version|-version) echo "Version: 1.11.2"; exit 0 ;;
+esac
+exit 0
+MOCK
+chmod +x "$SANDBOX/bin/nebula"
+unitdir="$SANDBOX/systemd"; mkdir -p "$unitdir"
+: > "$SYSTEMCTL_LOG"
+out="$(SYSTEMCTL_EMPTY=1 NEBULA_UNIT_DIR="$unitdir" \
+    bash "$unpack/install.sh" --dir "$target" --yes --no-dns 2>&1)"; rc=$?
+assert_eq "installer writes a missing unit" "$rc" "0"
+assert_file "unit file created" "$unitdir/nebula.service"
+assert_contains "unit reuses the detected binary and config" \
+    "$(grep '^ExecStart=' "$unitdir/nebula.service")" \
+    "ExecStart=$SANDBOX/bin/nebula -config $target/config.yml"
+assert_contains "installer reloads and enables the new unit" \
+    "$(cat "$SYSTEMCTL_LOG")" "enable --now nebula.service"
+assert_contains "installer reports the written unit" "$out" "Wrote $unitdir/nebula.service"
+
+rm -f "$unitdir/nebula.service"
+out="$(SYSTEMCTL_EMPTY=1 NEBULA_UNIT_DIR="$unitdir" \
+    bash "$unpack/install.sh" --dir "$target" --yes --no-dns --no-unit 2>&1)"; rc=$?
+assert_eq "--no-unit still exits 0" "$rc" "0"
+assert_no_file "--no-unit leaves the unit absent" "$unitdir/nebula.service"
+assert_contains "--no-unit explains what is missing" "$out" "install Nebula's service unit first"
+rm -f "$SANDBOX/bin/nebula"
 
 # --- old nebula binary: actionable V2 guidance -------------------------------
 cat > "$SANDBOX/bin/nebula" <<'MOCK'

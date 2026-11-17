@@ -111,7 +111,7 @@ assert_eq "included lighthouse gets the group rule" \
 "$NM" --cert-dir "$keys" cert firewall --firewall permissive \
     --select group:students --yes >/dev/null 2>&1
 assert_eq "permissive sets inbound_action" \
-    "$(yq -r '.firewall.inbound_action' "$keys/b1.mesh.yml")" "accept"
+    "$(yq -r '.firewall.inbound_action' "$keys/b1.mesh.yml")" "drop"
 
 "$NM" --cert-dir "$keys" cert firewall --policy group-ulno \
     --select cert:a1.mesh --yes >/dev/null 2>&1

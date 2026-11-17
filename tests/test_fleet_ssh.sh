@@ -27,7 +27,7 @@ cat > "$(policy_dir)/home.yml" <<'YAML'
 name: home
 groups: [home]
 firewall:
-  inbound_action: accept
+  inbound_action: drop
   inbound:
     - port: any
       proto: any
@@ -43,7 +43,7 @@ cat > "$SANDBOX/remote.yml" <<'YAML'
 pki:
   ca: /etc/nebula/ca.crt
 firewall:
-  inbound_action: drop
+  inbound_action: reject
   inbound: []
   outbound:
     - port: any
@@ -108,7 +108,7 @@ assert_contains "--domain candidate is used" "$out" "node5.theprof.net"
 : > "$SSH_LOG"
 out="$(fleet_ssh_cli node4 --policy home --yes --no-restart --cert-dir "$keys" 2>&1)"; rc=$?
 assert_eq "policy push exits 0" "$rc" "0"
-assert_contains "push shows the diff" "$out" "inbound_action: accept"
+assert_contains "push shows the diff" "$out" "inbound_action: drop"
 assert_contains "push installed the config" "$out" "Installed config on node4.theprof.mesh"
 assert_contains "push validated with nebula" "$out" "nebula -test passed"
 assert_contains "push backed up the old config" "$(cat "$SSH_LOG")" ".bak."

@@ -43,6 +43,27 @@ Looking for more answers? Check the [Full FAQ on GitHub Wiki »](https://github.
   [development.md ▸ How this fork relates to upstream](development.md#-how-this-fork-relates-to-upstream).
   The **Nebula binary** check and update are unaffected.
 
+## 🧯 Field notes (Debian clients)
+
+- **`lighthouse host is not within our networks` / `static_host_map key is not
+  within our networks`** — expected when the lighthouse sits in a different
+  overlay subnet than the client (e.g. client `10.100.1.11/24`, lighthouse
+  `10.100.0.1` in `10.100.0.0/24`). Discovery still works; only direct L3 traffic
+  to the lighthouse is skipped, which you do not need. It is a warning, not an
+  error. Put the lighthouse in a subnet every certificate shares if you want it
+  silent.
+- **`DNS resolution failed for static_map host … server misbehaving`** — this
+  appears after `apt install systemd-resolved`. Enabling resolved repoints
+  `/etc/resolv.conf` at `127.0.0.53`; if no upstream server is configured for
+  it, *all* lookups fail, including Nebula's `static_host_map` hostnames, so the
+  handshake never succeeds. Check `resolvectl status` (it must list a DNS
+  server) or set `DNS=` in `/etc/systemd/resolved.conf`. On servers without
+  dynamic DNS, putting the few mesh names in `/etc/hosts` is safer than
+  installing resolved.
+- **`Device "nebula1" does not exist` right after a start** — the TUN device is
+  created a moment later. Re-check with `ip -4 addr show nebula1` once
+  `systemctl is-active nebula.service` reports `active`.
+
 ---
 
 ## Nebula Manager updates (disabled in this fork)
