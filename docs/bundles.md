@@ -143,6 +143,11 @@ Windows equivalents (PowerShell `Invoke-WebRequest`/`Expand-Archive` or
 use **Manager Setup ▸ Import client bundle** — still works; cloning is optional
 for a client install.
 
+For a **class**, don't hand out one URL per student: `nebula-manager fleet bundle`
+writes all archives into one directory and `nebula-manager fleet serve` publishes
+it read-only behind a single password, so everybody downloads at once
+([fleet.md](fleet.md)).
+
 The template is **populated from the running Nebula config** when one can be
 read (`static_host_map`, `lighthouse.hosts`/`interval`, `punchy`, `listen`,
 `tun` and the `firewall` policy). If no readable local config exists, it derives

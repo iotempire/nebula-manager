@@ -882,8 +882,10 @@ Certificates ▸ Node Client Configs|node config config.yml client generate edit
 Certificates ▸ Revoke Certificate|revoke blocklist cert certificate|revoke_cert
 Certificates ▸ Switch Workspace|workspace cert dir keys store|select_cert_workspace
 Certificates ▸ Store Backup / Git|backup git history store cert|cert_store_menu
-Fleet|deploy fleet students share croc ssh push remote nodes|fleet_menu
-Fleet ▸ Share bundles via croc|students bundles codes share croc classroom|fleet_croc_tui
+Fleet|deploy fleet students share http serve croc ssh push remote nodes|fleet_menu
+Fleet ▸ Prepare bundles|prepare render bundle zip classic classroom students install|fleet_bundle_tui
+Fleet ▸ Serve over HTTP|serve http copyparty download url classroom students password|fleet_serve_tui
+Fleet ▸ Share one via croc|share single bundle croc code one student|fleet_croc_tui
 Fleet ▸ Push over SSH|push config firewall remote host ssh|fleet_ssh_tui
 Fleet ▸ Probe SSH|reachability port 22 user login ssh|fleet_probe_tui
 Instances|servers instances service systemd start stop restart|server_menu

@@ -23,7 +23,7 @@ lib/
   select.sh             # certificate selector grammar for batch actions
   policy.sh             # policy packs + per-node firewall choices
   store.sh              # store action log, backups, optional git snapshots
-  fleet.sh              # croc mass sharing, SSH push, reachability probing
+  fleet.sh              # bundle preparation, HTTP serving, croc/SSH deployment, reachability probing
 nebula-manager.conf.template  # bundled config template (offline first-run)
 build_single.sh         # generate dist/nebula-manager (single-file release)
 tests/                  # standalone mock-driven Bash test harness
@@ -142,7 +142,8 @@ What it covers:
 | `tests/test_bundle.sh` | client export: candidate listing, substring/ambiguous matching, default output dir, TUI picker, mode 0600 |
 | `tests/test_bundle_installer.sh` | self-contained bundles: install.sh/install.ps1/README shipped, user-owned install without sudo, config diff + refusal/`--yes`, backups, share one-liners |
 | `tests/test_installer_ps1.sh` | PowerShell installer under `pwsh` (Linux CI): parse, portable install, config diff/refusal/`-Yes`, `-CertsOnly`, plus simulated-Windows ACL and service install/start/restart with mocks |
-| `tests/test_fleet_croc.sh` | fleet croc: selection → bundles, one `CROC_SECRET=<code> croc send …` per node (never the rejected `--code` form), code table, dry-run, mobile-cert skip, policy embedding, unique codes |
+| `tests/test_fleet_croc.sh` | fleet bundle/croc: render-only bundles, sequential `croc send` with croc's own three-word code (never a custom `--code`/`CROC_SECRET`, which croc 11 rejects), `--dir`/`--bundle` sources, relay refusal and Ctrl-C reported as failure, `--local`/`--relay`, mobile-cert skip, policy embedding |
+| `tests/test_fleet_serve.sh` | fleet serve: copyparty read-only volume + login, generated password, python fallback without a password, newest `fleet-bundles-*` default, port-forward/reverse-tunnel hints |
 | `tests/test_fleet_ssh.sh` | fleet SSH: name expansion, port probing, user discovery, passwordless-sudo/root handling, remote fetch → local merge → diff → upload/backup/test, dry-run, unreachable guidance |
 | `tests/test_client_config.sh` | generated client template: real static_host_map/lighthouse/punchy/listen/tun/firewall from the local config, `[server.*]` fallback, and missing-value warnings |
 | `tests/test_edit.sh` | privileged-safe config editing: working copy for read-only/unreadable configs, elevated write-back, timestamped backup, and no-op when nothing changed |

@@ -124,7 +124,8 @@ Every menu action has a headless equivalent:
 ./nebula-manager cert list --cert-dir ~/keys/nebula
 ./nebula-manager cert firewall --from-group home --select all --yes
 ./nebula-manager cert bundle laptop1 --out ~/Downloads
-./nebula-manager fleet croc --select group:students --policy students
+./nebula-manager fleet bundle --select group:students --policy students
+./nebula-manager fleet serve --dir fleet-bundles-20261025-101500 --user class
 ./nebula-manager diag
 ./nebula-manager --help
 ```
@@ -140,7 +141,9 @@ Every menu action has a headless equivalent:
 | Move the mesh to one prefix (e.g. /16) | `nebula-manager cert renumber --prefix 16 --keep-keys` |
 | Allow inbound only from a group | `nebula-manager cert firewall --from-group home --select all --yes` |
 | Export a client bundle | `nebula-manager cert bundle node1 --out ~/Downloads` |
-| Share a class fleet over croc | `nebula-manager fleet croc --select group:students --policy students` |
+| Prepare a class fleet | `nebula-manager fleet bundle --select group:students --policy students` |
+| Hand it out over HTTP | `nebula-manager fleet serve --dir fleet-bundles-* --user class` |
+| Share one bundle with croc | `nebula-manager fleet croc --select cert:node1` |
 | Diagnostics | `nebula-manager diag` |
 
 ---
@@ -155,7 +158,7 @@ Every menu action has a headless equivalent:
 | **Bundles** | cert/key/CA + config, Linux/macOS `install.sh`, Windows `install.ps1`, config diffs, cert-only refresh, HTTP/croc one-liners → [bundles.md](docs/bundles.md) |
 | **Firewall** | this host's rules with a group picker, policy packs, batch node firewalls (lighthouse-safe) → [firewall.md](docs/firewall.md) |
 | **Configuration** | validate/edit the Nebula `config.yml` on a working copy, service restart, policy packs, name resolution → [usage.md](docs/usage.md), [dns.md](docs/dns.md) |
-| **Fleet** | `fleet croc` for a class (one code per node), `fleet ssh` with diff/backup/validate/restart → [fleet.md](docs/fleet.md) |
+| **Fleet** | `fleet bundle` → `fleet serve` (HTTP + copyparty password) for a class, `fleet croc` one receiver at a time, `fleet ssh` with diff/backup/validate/restart → [fleet.md](docs/fleet.md) |
 | **DNS** | lighthouse `serve_dns`, client resolver setup, boot hook → [dns.md](docs/dns.md) |
 | **Diagnostics** | TUN IP, listening UDP socket, certificate expiry; `listen.port`/auto-detect/`default_port`; ping and `iperf3` benchmarks → [usage.md](docs/usage.md) |
 | **Nebula lifecycle** | install/update from official releases with rollback, auto-update scheduler, service control → [usage.md](docs/usage.md) |

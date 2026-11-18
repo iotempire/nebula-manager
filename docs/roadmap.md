@@ -21,7 +21,8 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       per member (lighthouse + group isolation), and emit per-member
       self-contained bundles, the shared `ca.crt`, install scripts and a **per-OS
       README** (Linux/macOS + a Windows PowerShell snippet). Target output is a
-      ready-to-hand-out `dist/<group>/` directory; `fleet croc` can then serve it.
+      ready-to-hand-out `dist/<group>/` directory; `fleet serve` can then hand it
+      out.
 - [ ] **`verify`** – re-check reachability to the lighthouse (and the certificate
       chain) from a client, so a student can confirm their install without the
       teacher's console.
@@ -42,27 +43,25 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       git snapshots (private keys always excluded).
 - [x] **Remote fleet push** – `fleet ssh` fetches the remote config, merges a
       policy/firewall locally, shows a diff, uploads with a timestamped backup,
-      validates and restarts. `fleet croc` serves self-contained bundles with one
-      code per node (the recommended classroom mass-deployment path).
+      validates and restarts. `fleet bundle` renders the archives, `fleet serve`
+      publishes them over HTTP (read-only, copyparty password, python fallback)
+      and `fleet croc` shares them one receiver at a time with croc's own code.
 - [x] **Single-file release build** – `make build` (`make release` alias)
       generates `dist/nebula-manager` with modules and runtime assets embedded,
       plus a checksum. The modular `lib/` tree stays canonical; the artifact is
       attached to GitHub Releases and supports a one-`curl` install/update.
-- [ ] **Real-network confirmation for fleet** – run `fleet croc` between two
-      machines over croc's relay (including behind eduroam/NAT) and run
-      `fleet ssh` against a node with key auth + passwordless sudo. **Partially
-      done:** the public pool answered `relay admission rejected` on a first
-      classroom-sized run, which is why `--relay`, `--local` and `--delay` exist.
-      Still to confirm: own relay (`croc relay` on the VPS) with a full class, and
-      `--local` inside one lab VLAN.
-- [ ] **`fleet pack` – one archive for the whole class.** A bundle is bound to one
-      certificate, so “download once, everybody gets it” needs a different
-      artifact: one archive with a folder per node (`cert`, `key`, rendered
-      `config.yml`, `install.*`), which `croc store --downloads N`, a plain
-      `python3 -m http.server` or copyparty can hand out to everybody. Students
-      unpack their own folder. Would also give the teacher a single “class state”
-      file to re-issue later. (`croc store` alone is not enough: the public store
-      allows five upload creations per hour and two unfinished uploads per IP.)
+- [ ] **Real-network confirmation for fleet** – run `fleet serve` in front of a
+      real class (copyparty password, then the python fallback) including the
+      router/port-forward and reverse-tunnel variants, `fleet croc` through a
+      NAT/eduroam link, and `fleet ssh` against a node with key auth +
+      passwordless sudo. **Partially done:** the first classroom-sized croc run
+      answered `relay admission rejected` (per-source-IP admission limits), which
+      is why the class path is HTTP now and croc is limited to one receiver at a
+      time (`--local` for a single lab VLAN).
+- [ ] **`fleet serve` niceties** – a QR code for the class URL (so students can
+      scan instead of typing it), an optional one-time password note in
+      `README.txt`, and `--stop`/`--status` for a copyparty started in the
+      background (today it runs in the foreground until Ctrl-C).
 - [x] **Linux bundle installer provides the systemd unit.** Field report
       2026-11-17 (Debian, release tarball): `install.sh` now writes
       `/etc/systemd/system/<unit>` with the detected `ExecStart` and the installed

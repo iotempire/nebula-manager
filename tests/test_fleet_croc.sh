@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Test: fleet mass deployment over croc.
-#   * the selection is turned into self-contained bundles
-#   * one `CROC_SECRET=CODE croc send FILE` process per bundle is started
-#   * the code table and per-student commands are printed
-#   * --dry-run creates bundles but starts nothing
-#   * policy packs and the bundle README are wired correctly
+# Test: fleet bundle preparation + croc sharing (one receiver at a time).
+#   * `fleet bundle` renders bundles and transfers nothing
+#   * `fleet croc` streams one transfer per bundle, one after the other
+#   * croc's own three-word code is used (never a custom --code/CROC_SECRET)
+#   * --dir / --bundle share existing archives without re-rendering
+#   * a relay refusal (croc exits 0) and an interrupted transfer are reported
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
-TEST_LABEL="fleet croc deployment"
+TEST_LABEL="fleet: bundles + croc (sequential)"
 harness_init
 require_cmd nebula-cert
 require_cmd jq
@@ -39,93 +39,142 @@ firewall:
       groups: [students]
 YAML
 
-# Mock croc: record the invocation and exit immediately.
+# Mock croc: records the call, prints its own three-word code (like the real one)
+# and exits. CROC_RELAY_FAIL/CROC_EXIT simulate the field failures.
 cat > "$SANDBOX/bin/croc" <<'MOCK'
 #!/usr/bin/env bash
-printf 'CROC_SECRET=%s %s\n' "${CROC_SECRET:-}" "$*" >> "${CROC_LOG:?}"
-if [[ "${CROC_USAGE_NOTICE:-0}" == 1 ]]; then
-    echo "On UNIX systems, to send with a custom code phrase,"
-    echo "you need to set the environmental variable CROC_SECRET:"
-fi
+printf '%s\n' "$*" >> "${CROC_LOG:?}"
+n=0
+[[ -f "${CROC_COUNT:?}" ]] && n="$(cat "$CROC_COUNT")"
+n=$((n + 1)); printf '%s' "$n" > "$CROC_COUNT"
+if [[ "${CROC_SILENT:-0}" == 1 ]]; then exit 0; fi
+echo "Sending 'bundle' (12 kB)"
+echo "Code is: test-word-$n"
 if [[ "${CROC_RELAY_FAIL:-0}" == 1 ]]; then
-    echo "relay connection failed: could not connect to 1.getcroc.com:9009: relay admission rejected" >&2
+    echo "could not connect to 1.getcroc.com:9009: relay admission rejected" >&2
+    exit 0    # croc really exits 0 here - the manager must not call that a delivery
 fi
+if [[ "${CROC_EXIT:-0}" != 0 ]]; then exit "${CROC_EXIT}"; fi
+echo "Received"
 exit 0
 MOCK
 chmod +x "$SANDBOX/bin/croc"
-export CROC_LOG="$SANDBOX/croc.log"; : > "$CROC_LOG"
+export CROC_LOG="$SANDBOX/croc.log" CROC_COUNT="$SANDBOX/croc.count"
+: > "$CROC_LOG"; : > "$CROC_COUNT"
 
+# --- fleet bundle: render only ------------------------------------------------
 out_dir="$SANDBOX/fleet"
-out="$(fleet_croc_cli --select group:students --policy students --out "$out_dir" --dry-run 2>&1)"
-assert_eq "dry run exits 0" "$?" "0"
-assert_contains "dry run lists the nodes" "$out" "alice.mesh"
-assert_contains "dry run lists bob"       "$out" "bob.mesh"
-assert_contains "dry run prints codes"    "$out" "croc "
-assert_empty_file "dry run starts no transfers" "$CROC_LOG"
+out="$(fleet_bundle_cli --select group:students --policy students --out "$out_dir" 2>&1)"
+assert_eq "bundle exits 0" "$?" "0"
+assert_contains "bundle lists the nodes" "$out" "alice.mesh"
+assert_contains "bundle lists bob" "$out" "bob.mesh"
+assert_contains "bundle suggests fleet serve" "$out" "fleet serve --dir"
+assert_contains "bundle suggests fleet croc" "$out" "fleet croc --dir"
+assert_contains "bundle says nothing was transferred" "$out" "Bundles ready"
+assert_empty_file "bundle starts no transfer" "$CROC_LOG"
 assert_contains "mobile cert is skipped" "$out" "no local private key"
 assert_file "alice bundle created" "$out_dir/alice.mesh-nebula-bundle.zip"
-assert_file "bob bundle created"   "$out_dir/bob.mesh-nebula-bundle.zip"
+assert_file "bob bundle created" "$out_dir/bob.mesh-nebula-bundle.zip"
 assert_no_file "no bundle for the mobile cert" "$out_dir/phone.mesh-nebula-bundle.zip"
 
-# The bundle README contains the student's code and the policy is embedded.
+# The policy is embedded and the README has no hard-coded (wrong) croc code.
 require_cmd unzip
-code_a="$(awk '/alice/ {for (i=1;i<=NF;i++) if ($i ~ /^CROC_SECRET=/) { sub(/^CROC_SECRET=/,"",$i); print $i }}' "$CROC_LOG" | head -n1)"
-assert_eq "dry run did not call croc" "$code_a" ""
 readme="$(unzip -p "$out_dir/alice.mesh-nebula-bundle.zip" README.txt)"
 assert_contains "README has the croc client line" "$readme" "croc --yes"
-assert_contains "README mentions the students pack" "$readme" "policy pack 'students'"
+assert_contains "README mentions the policy pack" "$readme" "policy pack 'students'"
+assert_contains "README keeps the code placeholder" "$readme" "CROC-CODE"
 tmpl="$(unzip -p "$out_dir/alice.mesh-nebula-bundle.zip" config.yml.template)"
 assert_contains "client template uses the pack firewall" "$tmpl" "inbound_action: drop"
 
-# Real run: one croc process per bundle (the mock exits immediately).
-out="$(fleet_croc_cli --select group:students --policy students --out "$out_dir" 2>&1)"
+# --- croc --dry-run -----------------------------------------------------------
+out="$(fleet_croc_cli --select group:students --policy students --out "$SANDBOX/fleet-dry" --dry-run 2>&1)"
+assert_eq "dry run exits 0" "$?" "0"
+assert_contains "dry run lists alice" "$out" "alice.mesh"
+assert_contains "dry run lists bob" "$out" "bob.mesh"
+assert_contains "dry run says one after the other" "$out" "one after the other"
+assert_empty_file "dry run starts no transfer" "$CROC_LOG"
+
+# --- croc, real run: sequential, croc's own codes ----------------------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(fleet_croc_cli --select group:students --policy students --out "$SANDBOX/fleet-live" 2>&1)"
 assert_eq "croc run exits 0" "$?" "0"
-assert_eq "one croc send per bundle" "$(grep -c 'CROC_SECRET=.* --yes send ' "$CROC_LOG")" "2"
-assert_eq "sender does not use the rejected --code flag" "$(grep -c -- '--code' "$CROC_LOG")" "0"
-assert_contains "table lists alice" "$out" "alice.mesh"
-assert_contains "table lists bob"   "$out" "bob.mesh"
+assert_eq "one croc send per bundle" "$(grep -c 'send ' "$CROC_LOG")" "2"
+assert_contains "first transfer is alice" "$(sed -n '1p' "$CROC_LOG")" "alice.mesh-nebula-bundle.zip"
+assert_contains "second transfer is bob" "$(sed -n '2p' "$CROC_LOG")" "bob.mesh-nebula-bundle.zip"
+assert_contains "sharing announces the first slot" "$out" "=== Sharing 1/2: alice.mesh ==="
+assert_contains "sharing announces the second slot" "$out" "=== Sharing 2/2: bob.mesh ==="
+assert_contains "croc's code is used for alice" "$out" "test-word-1"
+assert_contains "croc's code is used for bob" "$out" "test-word-2"
 assert_contains "delivery is reported" "$out" "Delivered alice.mesh"
 assert_contains "delivery is reported for bob" "$out" "Delivered bob.mesh"
+assert_contains "summary table is printed" "$out" "croc sharing summary:"
+assert_eq "no custom code is forced on croc" "$(grep -c 'CROC_SECRET\|--code' "$CROC_LOG")" "0"
+assert_file "per-transfer log is kept" "$SANDBOX/fleet-live/.croc-alice.mesh.log"
 
-# Codes are in the invocation and are unique.
-mapfile -t codes < <(awk '{for (i=1;i<=NF;i++) if ($i ~ /^CROC_SECRET=/) { sub(/^CROC_SECRET=/,"",$i); print $i }}' "$CROC_LOG")
-assert_eq "two codes were generated" "${#codes[@]}" "2"
-assert_ne "codes are unique" "${codes[0]}" "${codes[1]}"
-assert_eq "codes are long enough for croc" "$([[ ${#codes[0]} -ge 6 ]] && echo yes)" "yes"
+# --- croc shares an existing directory without re-rendering ------------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(fleet_croc_cli --dir "$out_dir" 2>&1)"
+assert_eq "dir share exits 0" "$?" "0"
+assert_eq "dir share transfers each bundle" "$(grep -c 'send ' "$CROC_LOG")" "2"
+assert_contains "dir share names alice" "$out" "alice.mesh"
+assert_contains "dir share does not re-render" "$out" "Delivered"
+assert_file "dir share writes the log next to the archive" "$out_dir/.croc-alice.mesh.log"
 
-# Regression: croc 11.x prints a usage notice for `send --code` and exits 0;
-# that must be reported as a setup error, not a delivery.
-: > "$CROC_LOG"
-out="$(CROC_USAGE_NOTICE=1 fleet_croc_cli --select cert:alice.mesh --out "$SANDBOX/fleet-guard" 2>&1)"
-assert_eq "usage-notice run exits 0" "$?" "0"
-assert_not_contains "usage notice is not a delivery" "$out" "Delivered alice.mesh"
-assert_contains "usage notice is diagnosed" "$out" "rejected the custom code"
+# --- croc shares exactly one archive -----------------------------------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(fleet_croc_cli --bundle "$out_dir/bob.mesh-nebula-bundle.zip" 2>&1)"
+assert_eq "single bundle exits 0" "$?" "0"
+assert_eq "single bundle starts one transfer" "$(grep -c 'send ' "$CROC_LOG")" "1"
+assert_contains "single bundle is bob" "$(cat "$CROC_LOG")" "bob.mesh-nebula-bundle.zip"
+assert_not_contains "single bundle is not alice" "$(cat "$CROC_LOG")" "alice.mesh"
+assert_contains "single bundle is delivered" "$out" "Delivered bob.mesh"
 
-assert_eq "no sudo used" "$(sudo_count)" "0"
+# --- a relay that refuses (croc exits 0) is a failure ------------------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(CROC_RELAY_FAIL=1 fleet_croc_cli --bundle "$out_dir/alice.mesh-nebula-bundle.zip" 2>&1)"
+assert_not_contains "relay refusal is not a delivery" "$out" "Delivered alice.mesh"
+assert_contains "relay refusal is diagnosed" "$out" "relay refused the transfer"
+assert_contains "relay refusal points at fleet serve" "$out" "fleet serve"
+assert_contains "relay refusal marks the node failed" "$out" "failed"
+assert_contains "failed node is offered for a retry" "$out" "fleet croc --bundle"
 
-# --- own relay ---------------------------------------------------------------
-: > "$CROC_LOG"
-out="$(fleet_croc_cli --select cert:alice.mesh --relay 10.9.9.9:9009 \
-    --out "$SANDBOX/fleet-relay" 2>&1)"
-assert_contains "sender invokes the relay" "$(cat "$CROC_LOG")" "--relay 10.9.9.9:9009"
-assert_contains "printed receiver command carries the relay" "$out" "croc --relay 10.9.9.9:9009"
+# --- an interrupted transfer stops the loop and lists the rest ---------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(CROC_EXIT=130 fleet_croc_cli --dir "$out_dir" 2>&1)"
+assert_eq "interrupted run exits 0" "$?" "0"
+assert_eq "interruption stops after the first transfer" "$(grep -c 'send ' "$CROC_LOG")" "1"
+assert_contains "interruption is reported" "$out" "Stopped during"
+assert_contains "interrupted node is marked" "$out" "interrupted"
+assert_contains "the untouched node is listed" "$out" "not shared"
+assert_contains "the untouched node can be retried" "$out" "fleet croc --bundle"
+
+# --- croc without a code (older/newer output) is not a crash -----------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(CROC_SILENT=1 fleet_croc_cli --bundle "$out_dir/alice.mesh-nebula-bundle.zip" 2>&1)"
+assert_eq "codeless croc exits 0" "$?" "0"
+assert_contains "codeless croc is still delivered" "$out" "Delivered alice.mesh"
+
+# --- LAN-only and relay modes ------------------------------------------------
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(fleet_croc_cli --bundle "$out_dir/alice.mesh-nebula-bundle.zip" --local 2>&1)"
+assert_contains "sender uses --local" "$(cat "$CROC_LOG")" "--local"
+assert_contains "LAN-only mode is announced" "$out" "LAN only (--local)"
+
+: > "$CROC_LOG"; : > "$CROC_COUNT"
+out="$(fleet_croc_cli --bundle "$out_dir/alice.mesh-nebula-bundle.zip" --relay 10.9.9.9:9009 2>&1)"
+assert_contains "sender uses the relay" "$(cat "$CROC_LOG")" "--relay 10.9.9.9:9009"
 assert_contains "relay is announced" "$out" "Relay: 10.9.9.9:9009"
 
-# A relay that refuses (croc exits 0 anyway) must not be reported as delivered.
-: > "$CROC_LOG"
-out="$(CROC_RELAY_FAIL=1 fleet_croc_cli --select cert:alice.mesh \
-    --out "$SANDBOX/fleet-relayfail" 2>&1)"
-assert_not_contains "relay refusal is not a delivery" "$out" "Delivered alice.mesh"
-assert_contains "relay refusal is diagnosed" "$out" "Relay refused alice.mesh"
-assert_contains "relay refusal suggests --relay" "$out" "--relay HOST:PORT"
+# --- error handling ----------------------------------------------------------
+out="$(fleet_bundle_cli --bogus 2>&1)"; rc=$?
+assert_eq "unknown option is rejected" "$rc" "2"
+assert_contains "unknown option is named" "$out" "--bogus"
 
-# --- LAN-only mode -----------------------------------------------------------
-: > "$CROC_LOG"
-out="$(fleet_croc_cli --select cert:alice.mesh --local --out "$SANDBOX/fleet-local" 2>&1)"
-assert_contains "sender uses --local" "$(cat "$CROC_LOG")" "--local"
-assert_contains "printed receiver command uses --local" "$out" "croc --local"
-assert_contains "LAN-only mode is announced" "$out" "LAN only (--local)"
-assert_contains "HTTP fallback is suggested" "$out" "python3 -m http.server"
+out="$(fleet_croc_cli --bundle "$SANDBOX/nope.zip" 2>&1)"; rc=$?
+assert_eq "missing bundle is rejected" "$rc" "1"
+assert_contains "missing bundle is named" "$out" "Bundle not found"
+
+assert_eq "no sudo used" "$(sudo_count)" "0"
 
 # Regression: bundle creation redirects stderr to a log. An unreadable local
 # Nebula config must not sit on an invisible [y/N] prompt (looked like a hang).

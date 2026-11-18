@@ -24,7 +24,7 @@ Nebula config: /etc/nebula/config.yml
 Certificates: /home/theprof/keys/nebula (5 .crt)
 Manager config: /home/theprof/.config/nebula-manager/nebula-manager.conf
  1. 📜 Certificates (CA, nodes, groups)
- 2. 📤 Fleet (croc, SSH)
+ 2. 📤 Fleet (bundles, HTTP, croc, SSH)
  3. 📄 Instances (local services)
  4. 🔧 Instance Settings (config, firewall, DNS)
  5. 📡 Connectivity (ping nodes)

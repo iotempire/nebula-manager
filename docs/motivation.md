@@ -58,7 +58,7 @@ running a class exposed a different set of requirements:
 | Firewall | Policy packs, group pickers, batch node firewalls with lighthouse-aware defaults, and explicit AND/OR semantics. |
 | Bundles | Self-contained Linux/macOS and Windows installers, config diffs, cert-only updates, HTTP/croc sharing one-liners. |
 | Release | `make build` emits one self-contained executable (modules + runtime assets) for one-`curl` installs and updates; the modular `lib/` tree stays canonical. |
-| Fleet | `fleet croc` for classroom mass deployment and `fleet ssh` with diff/backup/validate/restart. |
+| Fleet | `fleet serve` (HTTP, password) for a classroom, `fleet croc` for one receiver at a time, and `fleet ssh` with diff/backup/validate/restart. |
 | Adoption | `import` discovers an existing Nebula installation and proposes `nebula-manager.conf`. |
 | Teaching | [User stories](user-stories.md), [distribution guides](linux-distros.md), preview transcripts, debug/`learn` modes. |
 | Quality | A dependency-free mock-driven Bash test suite, checksummed modules, and explicit manual-confirmation items for Windows/macOS/Android/iOS. |
@@ -88,8 +88,8 @@ running a class exposed a different set of requirements:
 - It is a per-host manager with fleet helpers, **not** a central control plane,
   database or monitoring system.
 - It does not implement a custom PKI, HSM integration, or a hosted service.
-- It does not silently change remote machines: `fleet ssh`/`fleet croc` are
-  explicit commands with previews.
+- It does not silently change remote machines: `fleet ssh`, `fleet serve` and
+  `fleet croc` are explicit commands with previews.
 
 ## History in one paragraph
 

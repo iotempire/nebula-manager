@@ -290,10 +290,10 @@ main_menu() {
         if [ ! -f "${NEBULA_DIR}/config.yml" ]; then
             setup_nebula_config
         fi
-        menu_options=("$(get_icon 'certificate')Certificates (CA, nodes, groups)" "$(get_icon 'upload')Fleet (croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'configuration')Instance Settings (config, firewall, DNS)" "$(get_icon 'connectivity')Connectivity (ping nodes)" "$(get_icon 'scan')Diagnostics (TUN, port, expiry)" "$(get_icon 'bench')Benchmarks (iperf3)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'maintenance')Updates & Install (Nebula binary)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_options=("$(get_icon 'certificate')Certificates (CA, nodes, groups)" "$(get_icon 'upload')Fleet (bundles, HTTP, croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'configuration')Instance Settings (config, firewall, DNS)" "$(get_icon 'connectivity')Connectivity (ping nodes)" "$(get_icon 'scan')Diagnostics (TUN, port, expiry)" "$(get_icon 'bench')Benchmarks (iperf3)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'maintenance')Updates & Install (Nebula binary)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
         menu_option_functions=("manage_nebula_certs" "fleet_menu" "server_menu" "manage_configuration" "check_node_connectivity" "run_diagnostics_tui" "run_benchmark" "setup_menu" "nebula_maintenance" "exit")
     else
-        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'upload')Fleet (croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
+        menu_options=("$(get_icon 'install')Install Nebula" "$(get_icon 'upload')Fleet (bundles, HTTP, croc, SSH)" "$(get_icon 'list')Instances (local services)" "$(get_icon 'download')Manager Setup (import, bundle, workspace)" "$(get_icon 'exit')${BOLD}Exit${RESET}")
         menu_option_functions=("install_nebula" "fleet_menu" "server_menu" "setup_menu" "exit")
     fi
     menu_title=("$MENU_PATH")
@@ -382,9 +382,17 @@ Commands:
                                   choice from certificate creation.
                                   --share-url/--croc-code fill the one-liners in
                                   the bundle's README.txt.
-  fleet croc [--select SPEC] [--policy PACK|--firewall MODE] [--out DIR]
-                                  Serve a bundle per selected node via croc and
-                                  print one code per node (class mass deployment).
+  fleet bundle [--select SPEC] [--policy PACK|--firewall MODE] [--out DIR]
+                                  Render a self-contained bundle per selected
+                                  node (cert, key, config, installers). Nothing
+                                  is transferred.
+  fleet serve [--dir DIR] [--port N] [--user NAME] [--password PASS]
+                                  Publish a bundle directory over HTTP for a
+                                  class (password-protected with copyparty,
+                                  plain python3 http.server otherwise).
+  fleet croc [--dir DIR|--bundle FILE|--select SPEC] [--local|--relay H:P]
+                                  Share bundles with croc, one receiver at a
+                                  time; croc prints the three-word code.
   fleet ssh TARGET [--policy PACK|--firewall MODE|--firewall-file FILE|
                     --config FILE] [--yes] [--dry-run] [--no-restart]
                                   Fetch a remote config, merge the firewall,

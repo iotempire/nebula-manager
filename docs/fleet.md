@@ -4,151 +4,172 @@
 
 ---
 
-Two paths, in priority order: **croc** for a classroom (no open ports, works
-behind NAT/eduroam) and **SSH** for one node you can already log into with a key.
+Three ways to get a client onto another machine, in priority order:
 
-## Two deployment paths
+| Path | Use it for | Needs |
+|---|---|---|
+| **`fleet serve`** (HTTP) | a whole class, everybody at once | one open port (or a reverse tunnel) |
+| **`fleet croc`** | one student at a time, NAT/eduroam, no port | nothing but `croc` on both sides |
+| **`fleet ssh`** | changing a node you already administer | key login + passwordless sudo |
 
-Two paths, in priority order. **croc** is the recommended classroom path (no open
-ports, works behind eduroam/NAT); **ssh** is for a single node you can already
-log into with a key.
+All three start from the same artifact: a **bundle** (`fleet bundle`) - the
+certificate, its private key, `ca.crt`, the rendered client config, `install.sh`,
+`install.ps1` and a `README.txt`.
 
-**TUI:** **Main Menu ▸ Fleet**
+**TUI:** **Main Menu ▸ Fleet** shows the three steps in that order: *Prepare
+bundles*, *Serve bundles over HTTP*, *Share one bundle via croc*.
 
-### Mass deployment with croc (classes)
+> **Why not croc for the whole class?** croc's public relay limits admissions per
+> source IP, and a lab full of students is one NAT address. Field test: three
+> simultaneous senders, one refused with `relay admission rejected` while the
+> other two worked. Running your own relay fixes it, but a password-protected
+> HTTP directory is simpler and gives students something they can bookmark. croc
+> stays useful for the one-off case.
 
-```bash
-nebula-manager fleet croc --select group:students --policy students
-```
-
-This renders one **self-contained bundle** per selected certificate (cert/key/CA,
-config template, `install.sh`, `install.ps1`, `README.txt`), starts **one `croc
-send` process per bundle** with a code chosen by nebula-manager, and prints:
-
-```text
-Bundles for your fleet (/home/you/fleet-bundles-20261025-101500):
-Node                           croc code                      Bundle
-alice.theprof.mesh             alice-theprof-mesh-3f9a1c2b    alice.theprof.mesh-nebula-bundle.zip
-bob.theprof.mesh               bob-theprof-mesh-7c2e44d1      bob.theprof.mesh-nebula-bundle.zip
-
-Students run:
-  croc alice-theprof-mesh-3f9a1c2b    # alice.theprof.mesh
-  croc bob-theprof-mesh-7c2e44d1      # bob.theprof.mesh
-```
-
-The command keeps waiting (one transfer per code) and reports `Delivered …` as
-each student receives. **Ctrl-C** stops the remaining senders. Per-transfer logs
-are written next to the bundles as `.croc-<node>.log`.
-
-> **The two waits are different.** Before the table appears, the bundles are
-> rendered for every selected certificate (a moment per node). If the local
-> `/etc/nebula/config.yml` is service-owned and unreadable, the tool asks there —
-> **visibly** — whether it may read it once with temporary sudo; batch prompts are
-> routed to the terminal even though each bundle's stderr goes to
-> `.bundle-<node>.log`. After the table it waits for students by design; that
-> second wait is not a hang.
-
-#### Relays: the public one can refuse you
-
-croc's public relay rate-limits admissions. A class starting at the same moment
-can hit `relay admission rejected` / `could not connect`, and the transfer fails
-(croc exits `0` in that case — the tool now reports it as a failure). Run your
-own relay on a host with a reachable IP (the VPS, or a machine in the lab) and
-use it on **both** sides:
+## Step 1 - prepare the bundles
 
 ```bash
-# once, on the relay host (TCP 9009-9013; 9009 is the main port)
-croc relay --host 0.0.0.0 --ports 9009,9010,9011,9012,9013
-
-# teacher: serve every bundle through that relay
-nebula-manager fleet croc --relay vps.theprof.demo:9009 --select group:students
-
-# student: same relay, then the code
-croc --relay vps.theprof.demo:9009 CODE
+nebula-manager fleet bundle --select group:students --policy students
 ```
 
-`CROC_RELAY=host:9009` works as a default for the manager, and the printed
-“Students run” lines already include `--relay …` when one is set. Only a relay the
-students can reach is useful — on a lab LAN, the teacher's machine is often the
-fastest relay and needs no internet at all.
+```
+Bundles ready (/home/theprof/fleet-bundles-20261025-101500):
+  Node                             Archive
+  ----                             -------
+  alice.theprof.mesh               alice.theprof.mesh-nebula-bundle.zip
+  bob.theprof.mesh                 bob.theprof.mesh-nebula-bundle.zip
 
-#### Three levers against the rate limit
+Hand them out:
+  whole class (HTTP):   nebula-manager fleet serve --dir "/home/theprof/fleet-bundles-20261025-101500"
+  one at a time:        nebula-manager fleet croc --dir "/home/theprof/fleet-bundles-20261025-101500"
+  node already set up:  nebula-manager fleet ssh NODE --policy PACK --yes
+```
 
-In order of usefulness:
+Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
+`ip:CIDR`, `cert:NAME`, or `all` (repeatable); a bare existing group name
+(`ulno`) is accepted as `group:ulno`. Mobile certs (no local `.key`) are skipped
+with a note - they are set up with a QR code instead
+([mobile.md](mobile.md)).
 
-1. **A relay you control** (above). This is the fix. The public pool limits
-   admissions per *source IP*, and a whole lab shares the campus NAT address, so
-   every student looks like one impatient client.
-2. **`--local`** for a lab LAN: croc uses multicast discovery plus a relay on the
-   teacher's machine and never contacts the internet. Works only inside one
-   broadcast domain — the lab VLAN yes, eduroam-to-lab no.
+The **firewall** in every generated config comes from, in order: `--policy PACK`,
+`--firewall MODE`, the node's saved choice from certificate creation, the last
+choice used in the TUI, and finally the detected local host config. The rendered
+config is also stored next to the certificate, so the bundle and the store never
+disagree.
 
-   ```bash
-   nebula-manager fleet croc --local --select group:students
-   ```
+Nothing is transferred by this command. `fleet-bundles-*` directories are
+git-ignored (they contain private keys); `.bundle-<node>.log` holds any build
+warnings.
 
-   The printed receive command then starts with `croc --local`, so students on
-   the same LAN can receive without any relay.
-3. **`--delay SECONDS`** spaces the senders apart (`--delay 5`): thirty joins
-   become a slow ramp instead of a burst. It lowers the chance of hitting the
-   limit, it does not remove it — every sender still waits for its own student, so
-   with `--delay 5` the last code only starts after two and a half minutes.
-
-If all of that is still awkward, plain HTTP is a perfectly good classroom server
-and needs no protocol at all — publish the output directory and hand out the URL:
+## Step 2a - serve the directory (recommended for a class)
 
 ```bash
-python3 -m http.server 8000 --directory fleet-bundles-20261025-101500
+nebula-manager fleet serve --dir fleet-bundles-20261025-101500 --user class
 ```
 
-A student then runs `wget http://TEACHER-IP:8000/alice.theprof.mesh-nebula-bundle.zip`.
-On a shared/untrusted network that also means the archives are readable by
-anyone on that network — the ZIP **does** contain the client private key, so use
-it on a lab LAN, not on eduroam. (The bundles are protected by the fact that the
-file name is only known to the class, which is not a security boundary; the CA key
-is never in a bundle.)
+```
+Serving fleet-bundles-20261025-101500 (28 bundle(s)) over HTTP
+  URL:      http://10.20.30.40:8000/
+  login:    class / 6Wq3hJ8tRy2nLpKd
+            (password generated for this run)
+```
 
-#### Why there is no single bundle for the whole class
+With [copyparty](https://github.com/9001/copyparty) installed, `fleet serve` runs
+it read-only with one login for the class:
 
-`croc store --downloads N --expiration 1d` exists (one upload, N downloads, plus a
-browser link) and looks like the obvious answer, but it does not fit here:
+```bash
+copyparty -p 8000 -i 0.0.0.0 -a class:PASS -v /path/fleet-bundles:/bundles:r,class
+```
 
-- **A bundle is bound to one certificate.** Sharing one archive means every
-  machine installs the same certificate and therefore the same overlay IP. Two
-  such hosts on one mesh fight over the address.
-- **Public stored transfers are rate limited too:** five upload creations per hour
-  and two unfinished uploads per source IP by default. Thirty per-node uploads do
-  not fit, and a self-hosted store (`croc store --url`) is yet another service to
-  run.
+Students open the URL, log in once, and download the archive with their name -
+all at the same time, resumable, no codes to pass around. Without copyparty the
+command falls back to `python3 -m http.server`, which serves the same files but
+**without a password**:
 
-The workable “download once, everybody gets it” shape is one **class pack**: a
-single archive holding one folder per node (`alice.theprof.mesh/{*.crt,*.key,*.yml,
-install.sh}`), distributed by `croc store`, HTTP or copyparty; each student
-unpacks their own folder. It is on the roadmap (`fleet pack`).
+```bash
+python3 -m http.server 8000 --directory fleet-bundles-20261025-101500 --bind 0.0.0.0
+```
 
-- Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
-  `ip:CIDR`, `cert:NAME`, or `all` (repeatable). A bare existing group name
-  (`ulno`) is accepted as `group:ulno`. Mobile certs (no local `.key`)
-  are skipped with a note.
-- Firewall: `--policy PACK` (e.g. the class policy) or `--firewall
-  host|permissive|default|pack:NAME|skip`. Without either, each node's saved
-  choice from certificate creation (or the last choice) is used, else the
-  detected host firewall.
-- `--out DIR` (default `./fleet-bundles-<timestamp>`, which is git-ignored
-  along with its `.croc-*.log` / `.bundle-*.log` files because the archives
-  contain private keys), `--relay HOST[:PORT]` (own croc relay; both sides must
-  use it), `--local` (LAN only, no public relay), `--delay SECONDS` (pause
-  between senders), `--code-prefix TEXT`, `--timeout SECONDS` (default:
-  wait forever), `--dry-run` (create bundles and print codes/commands, start no
-  senders).
-- Each student runs the code, extracts the archive and runs the installer:
-  `croc CODE`, then `unzip '*.zip'` / `Expand-Archive`, then
-  `sudo bash install.sh` (or `install.ps1`). The bundle's `README.txt` contains
-  the exact lines.
-- Senders use croc's secure mode (`CROC_SECRET=<code> croc send …`). Croc 11.x
-  rejects the older `send --code` form by printing a usage notice and exiting
-  `0`; the tool recognises that and reports it as an error instead of
-  `Delivered`.
+Install it once with `python3 -m pip install --user copyparty` (single file, no
+service, no config).
+
+Options: `--port N` (default 8000), `--bind ADDR`, `--user NAME` (a password is
+generated when `--password` is missing), `--backend auto|copyparty|python`,
+`--url-host HOST` (what to print in the URLs - useful when you know the external
+name), `--dry-run` (print command and URLs, start nothing).
+
+### Making it reachable
+
+The URL above only works inside your network. Three options, cheapest first:
+
+```bash
+# a) same LAN / lab VLAN: nothing to do
+# b) port forward on the router: TCP 8000 -> 10.20.30.40:8000
+# c) reverse tunnel from a host with a public address (no router change):
+ssh -R 8000:localhost:8000 vps.example.org
+#    then hand out http://vps.example.org:8000/  (keep the ssh session open)
+# and open the local firewall if one is active:
+sudo ufw allow 8000/tcp
+```
+
+**Treat the URL as a classroom secret.** The archives contain client private
+keys. `--user`/`--password` keeps strangers out; the CA key is never in a bundle,
+so a leak costs you the affected node certificates, not the whole mesh. If a
+password leaks, recreate the bundles with `--force`-new certificates
+(`cert sign`) rather than reusing them.
+
+## Step 2b - share one bundle with croc (one receiver at a time)
+
+For a single student, a demo, or a machine behind NAT with no reachable port:
+
+```bash
+nebula-manager fleet croc --select cert:alice.theprof.mesh
+# or, reusing what step 1 produced:
+nebula-manager fleet croc --dir fleet-bundles-20261025-101500
+# or exactly one archive:
+nebula-manager fleet croc --bundle fleet-bundles-*/alice.theprof.mesh-nebula-bundle.zip
+```
+
+```
+=== Sharing 1/2: alice.theprof.mesh ===
+Archive: /home/theprof/fleet-bundles-20261025-101500/alice.theprof.mesh-nebula-bundle.zip
+
+Sending 'alice.theprof.mesh-nebula-bundle.zip' (12.9 kB)
+Code is: tacit-camera-panda
+...
+[✔] Delivered alice.theprof.mesh (croc code tacit-camera-panda)
+
+=== Sharing 2/2: bob.theprof.mesh ===
+```
+
+- **croc picks the code**, and the manager shows it exactly as croc prints it -
+  nothing to pre-compute, and the bundle README keeps a `<CROC-CODE>`
+  placeholder because the code does not exist before the send starts.
+- Transfers run **one after the other** (`=== Sharing 1/2 ===`): with several
+  nodes selected, the next code only appears when the previous student is done.
+  The final table lists every node with its code and result, and anything that
+  was not delivered is printed as a ready-to-run `fleet croc --bundle …` line.
+- **Ctrl-C** aborts the current transfer and stops; the remaining nodes are
+  listed, so you can run them again later.
+- `--local` keeps croc inside the LAN (multicast discovery + local relay, no
+  internet); `--relay HOST[:PORT]` (`CROC_RELAY`) uses your own relay, and both
+  sides must pass it. `--dry-run` lists what would be shared and starts nothing.
+- A refusal is a failure, not a delivery: croc exits `0` when the relay says
+  `relay admission rejected`, so the manager greps its log and reports
+  `croc's relay refused the transfer`, suggesting `--local` or `fleet serve`.
+
+Students receive it with:
+
+```bash
+croc tacit-camera-panda
+unzip '*.zip'
+sudo bash install.sh
+```
+
+On Windows: `Expand-Archive` the archive and run `install.ps1` in PowerShell
+(see [windows.md](windows.md)).
+
+## Step 2c - push a change to a node you already run (SSH)
 
 ### SSH push to one node
 

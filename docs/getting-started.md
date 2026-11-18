@@ -50,7 +50,8 @@ service. Clients can use the bundle's self-contained installer.
 ./nebula-manager cert list --cert-dir ~/keys/nebula
 ./nebula-manager cert firewall --from-group home --select all --yes
 ./nebula-manager cert bundle laptop1 --out ~/Downloads
-./nebula-manager fleet croc --select group:students --policy students
+./nebula-manager fleet bundle --select group:students --policy students
+./nebula-manager fleet serve --dir fleet-bundles-20261025-101500 --user class
 ./nebula-manager diag
 ./nebula-manager --help
 ```
@@ -128,7 +129,7 @@ Nebula Manager checks for required tools on first run and prints an install
 command if any are missing (skippable via `ignore_dependency_check` in the conf).
 
 **Required:** `gawk` (`awk`), `curl`, `findutils` (`find`), `grep`, `jq`, `sed`, `sudo`, `systemd` (`systemctl`), `tar`, `wget`, `coreutils` (`sha256sum`), `iputils-ping`
-**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (fleet mass deployment without opening ports); `nc`/`netcat` (fast SSH port probing; falls back to bash `/dev/tcp`); `ssh` (fleet SSH push and probing)
+**Optional:** `yq` — **mikefarah v4 only**, used by the config and firewall editors (Fedora `yq`, Arch `go-yq`, or the upstream binary); `iperf3` (bandwidth tests); `whiptail` (graphical file/dir picker; menus are plain by default); `zip` (client bundles; falls back to `tar.gz`); `unzip` (installing a bundle via the README one-liner); `croc` (sharing one bundle with one student, no open ports); `copyparty` (password-protected HTTP for a whole class; `fleet serve` falls back to `python3 -m http.server`); `nc`/`netcat` (fast SSH port probing; falls back to bash `/dev/tcp`); `ssh` (fleet SSH push and probing)
 
 > ⚠️ **Nebula v1.10 or newer is required.** The academic edition signs **V2
 > certificates**; older Nebula releases reject them with `bytes did not contain a

@@ -25,7 +25,7 @@ headless subcommands for scripting — see *Expert / scriptable* below.
 | **Manager Setup** | shows the **detected state** (manager config, Nebula service, cert workspace), then: import/update from this host, **import a client bundle (.zip/.tar.gz)**, create, browse, edit, delete `nebula-manager.conf`, manage instances, pick the certificate workspace |
 | **Instances** | list / add / enable-disable / remove `[server.*]` entries, and start/stop the selected instance's service |
 | **Certificates** | list, create CA, sign, **re-sign all after a CA rotation**, **edit groups in bulk** (add/remove/move/set/rename with a filter), **firewall for nodes in bulk** (group policy, lighthouse-safe), view, expiry, **bundle/export** (pick from a list), **per-node client configs** (`<name>.yml` next to each cert: generate/edit/refresh), revoke, switch workspace, store backup/git |
-| **Fleet** | **croc mass deployment** (one code per student/node), **SSH push** of a config/firewall change, and SSH reachability probing |
+| **Fleet** | **bundle** preparation, **HTTP serving** for a class (copyparty password or python fallback), **croc** for one receiver at a time, **SSH push** of a config/firewall change, and SSH reachability probing |
 | **Instance Settings** | validate / edit Nebula `config.yml` (service-owned files are edited on a working copy and saved once with a timestamped backup), edit firewall rules with a **group picker + rule templates + explain**, **policy packs** (embed in bundles / apply / export), **name resolution (Nebula DNS)** |
 | **Connectivity** | ping every cert IP; optional `iperf3` test |
 | **Diagnostics** | TUN IP, listening UDP socket, certificate expiry; reads a service-owned config once with temporary sudo and caches the header values |
@@ -141,9 +141,13 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 
 # Fleet                      (TUI: Fleet)
-./nebula-manager fleet croc --select group:students --policy students
-#   ^ one bundle + one croc code per student; Ctrl-C stops the senders
-./nebula-manager fleet croc --select group:students --policy students --dry-run
+./nebula-manager fleet bundle --select group:students --policy students
+#   ^ renders one self-contained bundle per node, transfers nothing
+./nebula-manager fleet serve --dir fleet-bundles-20261025-101500 --user class
+#   ^ read-only HTTP for a whole class (copyparty password, else http.server)
+./nebula-manager fleet croc --select cert:alice.theprof.mesh
+#   ^ one receiver at a time; croc prints the three-word code
+./nebula-manager fleet croc --dir fleet-bundles-20261025-101500 --dry-run
 ./nebula-manager fleet probe node4
 ./nebula-manager fleet ssh node4 --policy home --yes
 ./nebula-manager fleet ssh node4 --config ./config.yml --dry-run

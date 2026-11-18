@@ -39,7 +39,7 @@ Start the tool and everything is selectable from the text-graphical menus:
 | **Manager Setup** | shows the detected state, then Import/Update / **Import client bundle** / Create / Browse / Edit / Delete config, Manage instances, Certificate Workspace |
 | **Instances** | List / Add / Enable-Disable / Remove `[server.*]`, start/stop the service |
 | **Certificates** | List / Create CA / Sign / **Re-sign all after a CA rotation** / Groups-batch / **Firewall for nodes (batch)** / View / Expiry / **per-node client configs** (`<name>.yml` next to each cert) / **Bundle-export client zip** (pick from a list) / Revoke / Switch workspace |
-| **Fleet** | **croc mass deployment** (one code per student) / **SSH push** of a config or firewall / SSH reachability probe |
+| **Fleet** | **bundle** preparation / **HTTP serving** for a class / **croc** for one receiver at a time / **SSH push** of a config or firewall / SSH reachability probe |
 | **Instance Settings** | Validate / Edit Nebula `config.yml` / Firewall / Name resolution |
 | **Connectivity** | ping all cert IPs (+ optional `iperf3`) |
 | **Diagnostics** | TUN ip, UDP socket, cert expiry |
@@ -541,9 +541,10 @@ $ nebula-manager policy export --pack home --select group:home --out ./policies/
 ```
 
 Distribution is explicit: `fleet ssh NODE --policy home` pushes the change with a
-diff, backup, validation and restart; `fleet croc` serves the bundles to the class
-with one code per node. nebula-manager never touches a remote host unless you run
-one of those commands. On the machine itself he can also apply a pack
+diff, backup, validation and restart; `fleet serve` hands the bundles to the class
+over HTTP, and `fleet croc` shares a single bundle when there is no reachable
+port. nebula-manager never touches a remote host unless you run one of those
+commands. On the machine itself he can also apply a pack
 directly (working copy, diff confirmation, backup when elevation is needed):
 
 ```bash
@@ -645,45 +646,58 @@ shows the effective policy; a `ping` from a `home` node now works, while a
 through the lighthouse. Student nodes keep their own policy — if they should
 only talk to each other, apply `--from-group students` to their configs.
 
-### Phase 2e — Hand out the class bundles, one code per student
+### Phase 2e — Hand out the class bundles (HTTP first, croc for one-offs)
 
-**TUI:** *Fleet ▸ Share student bundles via croc* (or headless):
+**TUI:** *Fleet ▸ Prepare bundles* → *Fleet ▸ Serve bundles over HTTP*.
 
 ```bash
-$ nebula-manager fleet croc --select group:students --policy students
-Bundles for your fleet (/home/theprof/fleet-bundles-20261025-101500):
-Node                           croc code                      Bundle
-alice.theprof.mesh             alice-theprof-mesh-3f9a1c2b    alice.theprof.mesh-nebula-bundle.zip
-bob.theprof.mesh               bob-theprof-mesh-7c2e44d1      bob.theprof.mesh-nebula-bundle.zip
-...
-Students run:
-  croc alice-theprof-mesh-3f9a1c2b    # alice.theprof.mesh
-  croc bob-theprof-mesh-7c2e44d1      # bob.theprof.mesh
+$ nebula-manager fleet bundle --select group:students --policy students
+Bundles ready (/home/theprof/fleet-bundles-20261025-101500):
+  Node                             Archive
+  ----                             -------
+  alice.theprof.mesh               alice.theprof.mesh-nebula-bundle.zip
+  bob.theprof.mesh                 bob.theprof.mesh-nebula-bundle.zip
+
+Hand them out:
+  whole class (HTTP):   nebula-manager fleet serve --dir "…/fleet-bundles-20261025-101500"
+  one at a time:        nebula-manager fleet croc --dir "…/fleet-bundles-20261025-101500"
+  node already set up:  nebula-manager fleet ssh NODE --policy PACK --yes
+
+$ nebula-manager fleet serve --dir fleet-bundles-20261025-101500 --user class
+Serving fleet-bundles-20261025-101500 (28 bundle(s)) over HTTP
+  URL:      http://10.20.30.40:8000/
+  login:    class / 6Wq3hJ8tRy2nLpKd
 ```
 
 Each selected certificate gets a **self-contained bundle** (cert/key/CA, config,
-`install.sh`, `install.ps1`, `README.txt`) and its **own croc process**, so there
-is no shared archive and no open port to configure. theprof pastes one line per
-student into the class chat; `Ctrl-C` stops the remaining senders. Mobile certs
-(no local `.key`) are skipped automatically. Add `--dry-run` to create the
-bundles and codes without starting any transfer, or `--timeout 600` to stop
-after ten minutes.
+`install.sh`, `install.ps1`, `README.txt`). theprof serves the directory read-only
+with one password for the class (copyparty when installed, otherwise python's
+`http.server` without a password), puts the URL on the projector, and everybody
+downloads at once. `--user class` is enough: the password is generated and
+printed once.
 
-The first classroom-sized run taught one lesson: croc's **public** relay limits
-admissions per source IP, and a lab is one source IP, so a burst of students ends
-in `relay admission rejected`. theprof therefore runs his own relay (the VPS he
-already has) and passes it once:
+The first classroom-sized run killed the original design: croc's **public** relay
+limits admissions per source IP, and a lab is one source IP, so a burst of
+students ended in `relay admission rejected` (three senders: one refused, two
+fine). Running a private relay only to hand out files is more work than
+publishing a directory, so the class path moved to HTTP. croc is still there for
+what it is good at - **one receiver at a time**, no port to open:
 
 ```bash
-$ croc relay --host 0.0.0.0 --ports 9009,9010,9011,9012,9013   # once, on the VPS
-$ nebula-manager fleet croc --relay vps.theprof.mesh:9009 --select group:students
+$ nebula-manager fleet croc --select cert:alice.theprof.mesh
+=== Sharing 1/1: alice.theprof.mesh ===
+Code is: tacit-camera-panda
+[✔] Delivered alice.theprof.mesh (croc code tacit-camera-panda)
 ```
 
-The printed student lines then include `--relay`. Inside a single lab VLAN
-`--local` is even simpler (multicast discovery, no internet), and `--delay 5`
-spaces the senders out when the public relay has to be used anyway. A shared
-archive for everybody is deliberately **not** offered: a bundle carries one
-certificate, so two machines would end up with the same overlay IP.
+croc picks the code itself; the manager prints it, streams croc's output, and
+moves to the next bundle only after the current student is done (`--dir` shares a
+prepared directory one archive after the other). `Ctrl-C` stops and lists what is
+left, and `--local` keeps the transfer inside a lab VLAN without the internet.
+
+The archives contain client private keys, so the URL stays inside the class: the
+CA key is never in a bundle, and a leaked node certificate can be revoked and
+re-signed without touching the rest of the mesh.
 
 For an **already-installed** node he can push a firewall change over SSH instead
 of handing out a bundle:
@@ -706,9 +720,11 @@ a policy merge.
 ## Story 2 — The students join
 
 Names: **Alex** (Windows 11), **Bianca** (Ubuntu), **Chen** (macOS), **Dana** (iPhone).
-Desktop students receive their **own croc code** (or an HTTP URL). Theprof runs
-`fleet croc --select group:students --policy students`; each student gets a line
-like `croc alice-theprof-mesh-3f9a1c2b`. Each archive is self-contained —
+Desktop students download their archive from the class URL (or get a croc code if
+they are not on the campus network). Theprof runs `fleet bundle` once, then
+`fleet serve --user class`, and puts `http://10.20.30.40:8000/` plus the class
+password on the projector; a student who cannot reach it gets
+`fleet croc --select cert:NAME` instead. Each archive is self-contained —
 `install.sh` / `install.ps1` plus a `README.txt` with the exact one-liners — so
 students do **not** need to clone nebula-manager. Dana receives her signed cert +
 `ca.crt` (and an optional QR) for the mobile app instead.
@@ -877,7 +893,8 @@ The installer:
 | Diagnostics (TUN ip, UDP socket auto-detect, cert expiry) and iperf3 |
 | **`import`** (discover a running Nebula) and **`import --bundle --start`** (install + service) |
 | **`instance add/list/remove/enable/disable`** (`server` alias) |
-| **Fleet croc** mass deployment (one code per node) |
+| **Fleet bundles + HTTP serving** (password-protected class download) |
+| **Fleet croc** for one receiver at a time (croc's own code) |
 | **Single-file release build** (`make build`, one-curl install) |
 | **Fleet SSH** probe, config/firewall push, validation and restart |
 | Windows-native bundle installer (`install.ps1`) |
