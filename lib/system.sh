@@ -836,15 +836,26 @@ read_nebula_config() {
     # substitution), so the prompt is still reachable.
     if [[ "${NEBULA_NO_PROMPT:-0}" != 1 ]] && command -v sudo >/dev/null 2>&1 \
         && { [[ -t 2 ]] || [[ -r /dev/tty ]]; }; then
-        local a
-        if [[ -t 0 ]]; then
-            read -rp "$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: " a
+        local a="" q
+        q="$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: "
+        # Ask on the terminal even when stderr is redirected (bundle creation and
+        # other batch paths send stderr to a log; an invisible prompt would look
+        # like a hang).
+        if [[ -t 2 ]]; then
+            read -rp "$q" a
         elif [[ -r /dev/tty ]]; then
-            read -rp "$(show_status 'question') ${config_file} is service-owned and not readable. Read it once with temporary sudo? [y/N]: " a < /dev/tty
+            printf '%s' "$q" > /dev/tty
+            IFS= read -r a < /dev/tty || a=""
         else
             return 1
         fi
-        [[ "$a" =~ ^[Yy] ]] && { elevate_why "read the Nebula service config $config_file" cat "$config_file" && return 0; }
+        if [[ "$a" =~ ^[Yy] ]]; then
+            # Keep sudo's own password prompt visible for the same reason.
+            if [[ ! -t 2 && -r /dev/tty ]]; then
+                sudo -v < /dev/tty > /dev/tty 2>&1 || return 1
+            fi
+            elevate_why "read the Nebula service config $config_file" cat "$config_file" && return 0
+        fi
     fi
     return 1
 }

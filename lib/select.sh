@@ -253,6 +253,20 @@ cert_select_filter_prompt() {
     printf 'Examples: group:example-group  name:example-host-*  ip:%s' "$ip_example"
 }
 
+# cert_filter_normalize <spec> <cert_dir> : a bare group name becomes group:NAME.
+# Typing `ulno` at the filter prompt is what people do; make it work.
+cert_filter_normalize() {
+    local spec="$1" cert_dir="$2"
+    case "$spec" in
+        ""|all|none|*:*) printf '%s' "$spec"; return 0 ;;
+    esac
+    if cert_group_counts "$cert_dir" 2>/dev/null | cut -f1 | grep -qxF -- "$spec"; then
+        printf 'group:%s' "$spec"
+    else
+        printf '%s' "$spec"
+    fi
+}
+
 # cert_select_tui [cert_dir]
 # Show the workspace's actual groups/networks, ask for a filter, then confirm an
 # (all-on) checklist of the matches. Narrows SEL_* to the chosen certificates.
@@ -265,6 +279,12 @@ cert_select_tui() {
     while true; do
         spec="$(ui_input "Select certificates" "$prompt" "all")" || return 1
         [[ -z "$spec" ]] && spec="all"
+        # Numbers here are almost always a copy/paste of the selection wanted next.
+        if [[ "$spec" =~ ^[0-9]+([,-][0-9]+)*$ ]]; then
+            log_warn "'$spec' looks like a list of numbers, not a filter."
+            log_info "Press Enter to keep [all], then choose numbers at the next prompt."
+        fi
+        spec="$(cert_filter_normalize "$spec" "$cert_dir")"
         if cert_select "$cert_dir" --select "$spec"; then
             break
         fi

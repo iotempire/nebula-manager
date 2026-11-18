@@ -100,4 +100,18 @@ assert_contains "usage notice is diagnosed" "$out" "rejected the custom code"
 
 assert_eq "no sudo used" "$(sudo_count)" "0"
 
+# Regression: bundle creation redirects stderr to a log. An unreadable local
+# Nebula config must not sit on an invisible [y/N] prompt (looked like a hang).
+sec="$SANDBOX/service-owned.yml"
+printf 'tun:\n  dev: nebula1\n' > "$sec"
+chmod 000 "$sec"
+if [[ -r "$sec" ]]; then
+    echo "SKIP: cannot make a file unreadable in this environment"
+else
+    out="$(NEBULA_NO_PROMPT=1 timeout 5 bash -c "source '$REPO_ROOT/lib/ui.sh'; source '$REPO_ROOT/lib/system.sh'; read_nebula_config '$sec'" 2>&1)"; rc=$?
+    assert_ne "unreadable config fails fast instead of prompting" "$rc" "124"
+    assert_eq "unreadable config reports failure" "$rc" "1"
+fi
+chmod 644 "$sec"
+
 harness_summary

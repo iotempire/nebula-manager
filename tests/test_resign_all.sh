@@ -10,6 +10,7 @@
 #   * the certificate store is snapshotted before mutation
 #   * no sudo is required in a user-owned store
 #   * the CLI (cert resign-all) mirrors the library helper
+#   * --prefix (cert renumber) rewrites the mask, keeping address/groups/keys
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
@@ -192,5 +193,40 @@ out="$(bash "$REPO_ROOT/nebula-manager" cert resign-all --help 2>&1)"
 assert_contains "CLI help documents --keep-keys" "$out" "--keep-keys"
 assert_contains "CLI help documents --skip-device" "$out" "--skip-device"
 assert_contains "CLI help documents --dry-run" "$out" "--dry-run"
+
+# --- renumber: rewrite the prefix, keep address/groups/subnets/keys --------
+n1_key_before_renum="$(sha "$keys/node1.mesh.key")"
+n2_key_before_renum="$(sha "$keys/node2.mesh.key")"
+
+out="$(PKI_RESIGN_PREFIX=16 PKI_RESIGN_DRY=1 PKI_RESIGN_YES=1 pki_resign_all "$keys" 2>&1)"
+assert_contains "renumber preview shows the new prefix" "$out" "10.42.0.2/16"
+assert_contains "renumber preview explains the change"  "$out" "Network prefix rewritten to /16"
+assert_eq "renumber dry run changed nothing" \
+    "$(networks_of "$keys/node1.mesh.crt")" "10.42.0.2/24"
+
+out="$(PKI_RESIGN_PREFIX=16 PKI_RESIGN_KEEP_KEYS=1 PKI_RESIGN_YES=1 \
+    pki_resign_all "$keys" 2>&1)"; rc=$?
+assert_eq "renumber exits successfully" "$rc" "0"
+assert_eq "node1 keeps its address with the new prefix" \
+    "$(networks_of "$keys/node1.mesh.crt")" "10.42.0.2/16"
+assert_eq "node2 keeps its address with the new prefix" \
+    "$(networks_of "$keys/node2.mesh.crt")" "10.42.0.3/16"
+assert_eq "device cert keeps its address with the new prefix" \
+    "$(networks_of "$keys/phone.mesh.crt")" "10.42.0.4/16"
+assert_eq "renumber keeps the node1 key with --keep-keys" \
+    "$(sha "$keys/node1.mesh.key")" "$n1_key_before_renum"
+assert_eq "renumber keeps the node2 key with --keep-keys" \
+    "$(sha "$keys/node2.mesh.key")" "$n2_key_before_renum"
+assert_eq "renumber keeps groups"  "$(groups_of "$keys/node1.mesh.crt")" "web"
+assert_eq "renumber keeps subnets" "$(subnets_of "$keys/node2.mesh.crt")" "192.168.50.0/24"
+assert_eq "renumber used no sudo" "$(sudo_count)" "0"
+
+# CLI alias + guard
+out="$(bash "$REPO_ROOT/nebula-manager" cert renumber --cert-dir "$keys" --prefix 16 --dry-run 2>&1)"; rc=$?
+assert_eq "CLI renumber dry run exits 0" "$rc" "0"
+assert_contains "CLI renumber previews the plan" "$out" "10.42.0.2/16"
+out="$(bash "$REPO_ROOT/nebula-manager" cert renumber --cert-dir "$keys" </dev/null 2>&1)"; rc=$?
+assert_eq "CLI renumber requires --prefix" "$rc" "2"
+assert_contains "CLI renumber explains the missing prefix" "$out" "needs --prefix"
 
 harness_summary

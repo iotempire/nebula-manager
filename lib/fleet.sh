@@ -179,6 +179,13 @@ fleet_croc_cli() {
     out_dir="${out_dir:-$PWD/fleet-bundles-$(date +%Y%m%d-%H%M%S)}"
     ensure_dir "$out_dir" || { [[ -n "$fixed_tmp" ]] && rm -f "$fixed_tmp"; return 1; }
 
+    # Bundle creation redirects stderr to a log. Warm the service-config read here
+    # (with the prompt visible) so an unreadable /etc/nebula/config.yml cannot
+    # block the whole batch on an invisible [y/N] prompt.
+    if declare -F pki_detect_network_config >/dev/null; then
+        pki_detect_network_config "$cert_dir" >/dev/null || true
+    fi
+
     local -a names=() codes=() bundles=() live=() temp_files=()
     [[ -n "$fixed_tmp" ]] && temp_files+=("$fixed_tmp")
     local i name code bundle fw_path fw_temp logf
@@ -208,7 +215,7 @@ fleet_croc_cli() {
             code="$(fleet_make_code "$name")"
         fi
         logf="$out_dir/.bundle-$name.log"
-        bundle="$(pki_bundle_client_zip "$name" "$out_dir" "$cert_dir" "$fw_path" "" "$code" 2>"$logf" | tail -n1)"
+        bundle="$(NEBULA_NO_PROMPT=1 pki_bundle_client_zip "$name" "$out_dir" "$cert_dir" "$fw_path" "" "$code" 2>"$logf" | tail -n1)"
         if [[ -z "$bundle" || ! -f "$bundle" ]]; then
             log_error "Could not create a bundle for $name (see $logf)."
             continue

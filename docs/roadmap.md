@@ -93,6 +93,10 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
 - [x] **Windows native bundle installer** (`install.ps1`) – elevation, key ACLs and
       `nebula.exe -service install/start` are implemented; a real-host run is
       tracked in the manual checklist below.
+- [x] **Network renumbering** – `cert renumber --prefix N` re-signs every non-CA
+      certificate with the same address under a new mask (e.g. `/24` → `/16`),
+      keeping groups, routed subnets and — with `--keep-keys` — the private keys.
+      Dry-run, snapshot and action log included.
 - [ ] **Pre-1.10 client compatibility** – optionally create a v1 CA/certificates
       (`nebula-cert ca -version 1`) for meshes that still contain hosts with old
       distribution packages (Debian 12: 1.6.1, Debian 13: 1.9.3). Today those

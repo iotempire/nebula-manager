@@ -40,8 +40,17 @@ The command keeps waiting (one transfer per code) and reports `Delivered …` as
 each student receives. **Ctrl-C** stops the remaining senders. Per-transfer logs
 are written next to the bundles as `.croc-<node>.log`.
 
+> **The two waits are different.** Before the table appears, the bundles are
+> rendered for every selected certificate (a moment per node). If the local
+> `/etc/nebula/config.yml` is service-owned and unreadable, the tool asks there —
+> **visibly** — whether it may read it once with temporary sudo; batch prompts are
+> routed to the terminal even though each bundle's stderr goes to
+> `.bundle-<node>.log`. After the table it waits for students by design; that
+> second wait is not a hang.
+
 - Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
-  `ip:CIDR`, `cert:NAME`, or `all` (repeatable). Mobile certs (no local `.key`)
+  `ip:CIDR`, `cert:NAME`, or `all` (repeatable). A bare existing group name
+  (`ulno`) is accepted as `group:ulno`. Mobile certs (no local `.key`)
   are skipped with a note.
 - Firewall: `--policy PACK` (e.g. the class policy) or `--firewall
   host|permissive|default|pack:NAME|skip`. Without either, each node's saved

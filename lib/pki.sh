@@ -3457,9 +3457,14 @@ rename_group_cli() {
 # Re-issue every non-CA certificate with the current CA. Certificates with a
 # local .key get new keys by default; device-only certs keep their public key.
 # Env: PKI_RESIGN_DRY, PKI_RESIGN_YES, PKI_RESIGN_KEEP_KEYS,
-#      PKI_RESIGN_SKIP_DEVICE (all 0/1).
+#      PKI_RESIGN_SKIP_DEVICE (all 0/1), PKI_RESIGN_PREFIX (e.g. 16).
 pki_resign_all() {
     local cert_dir="${1:-$(resolve_cert_dir)}"
+    local prefix="${PKI_RESIGN_PREFIX:-}"
+    if [[ -n "$prefix" && ! "$prefix" =~ ^([0-9]|[12][0-9]|3[0-2])$ ]]; then
+        log_error "Invalid prefix '$prefix' (expected 0-32)."
+        return 2
+    fi
     CERT_STORE_AUDIT_DIR="$cert_dir"; export CERT_STORE_AUDIT_DIR
     local bin; bin="$(pki_cert_bin)" || return 1
     local bin_path; bin_path="$(dirname "$bin")"
@@ -3481,6 +3486,10 @@ pki_resign_all() {
         [[ "$(jq -r '.details.isCa // false' <<<"$json" 2>/dev/null)" == "true" ]] && continue
         name="$(jq -r '.details.name // empty' <<<"$json" 2>/dev/null)"
         ip="$(jq -r '(.details.ips // []) | join(",")' <<<"$json" 2>/dev/null)"
+        if [[ -n "$prefix" ]]; then
+            # Keep every address, change only the network mask (e.g. /24 -> /16).
+            ip="$(printf '%s' "$ip" | sed -E "s|/[0-9]+|/$prefix|g")"
+        fi
         grp="$(jq -r '(.details.groups // []) | join(",")' <<<"$json" 2>/dev/null)"
         sub="$(jq -r '(.details.subnets // []) | join(",")' <<<"$json" 2>/dev/null)"
         if [[ -z "$name" || -z "$ip" ]]; then
@@ -3520,6 +3529,7 @@ pki_resign_all() {
     (( ${#devices[@]} )) && echo "  Device certs (no local key; device key kept): ${devices[*]}"
     (( ${#skipped_devices[@]} )) && echo "  Skipped (no local key): ${skipped_devices[*]}"
     echo "  Expiry inherits the current CA; old cert/key files are backed up first."
+    [[ -n "$prefix" ]] && echo "  Network prefix rewritten to /$prefix (addresses unchanged)."
     echo
 
     if [[ "$dry" == 1 ]]; then
@@ -3956,8 +3966,8 @@ pki_cli() {
         firewall|fw)
             pki_firewall_cli "$@"
             ;;
-        resign-all|renew-all|resignall)
-            local rcert="" rdry=0 ryes=0 rkeep=0 rskip=0
+        resign-all|renew-all|resignall|renumber)
+            local rcert="" rdry=0 ryes=0 rkeep=0 rskip=0 rprefix=""
             while (( $# )); do
                 case "$1" in
                     --cert-dir) shift; rcert="${1:-}" ;;
@@ -3966,13 +3976,18 @@ pki_cli() {
                     --yes|-y) ryes=1 ;;
                     --keep-keys) rkeep=1 ;;
                     --skip-device|--skip-mobile) rskip=1 ;;
+                    --prefix) shift; rprefix="${1:-}" ;;
+                    --prefix=*) rprefix="${1#*=}" ;;
                     -h|--help)
                         cat >&2 <<'EOF'
 Usage: nebula-manager cert resign-all [options]
+       nebula-manager cert renumber --prefix N [options]
 
 Re-issue every non-CA certificate with the current CA.
 
   --cert-dir DIR   Certificate workspace
+  --prefix N       Rewrite the network mask (e.g. --prefix 16 keeps every
+                   address and turns 10.100.1.11/24 into 10.100.1.11/16)
   --keep-keys      Keep existing private keys (default: new keys for local certs)
   --skip-device    Skip certs without a local private key (mobile/device)
   --dry-run, -n    Show the preview; change nothing
@@ -3983,8 +3998,13 @@ EOF
                 esac
                 shift
             done
+            if [[ "$sub" == "renumber" && -z "$rprefix" ]]; then
+                log_error "'cert renumber' needs --prefix N (e.g. --prefix 16)."
+                return 2
+            fi
             PKI_RESIGN_DRY="$rdry" PKI_RESIGN_YES="$ryes" \
                 PKI_RESIGN_KEEP_KEYS="$rkeep" PKI_RESIGN_SKIP_DEVICE="$rskip" \
+                PKI_RESIGN_PREFIX="$rprefix" \
                 pki_resign_all "$rcert"
             ;;
         workspace)

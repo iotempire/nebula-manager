@@ -73,6 +73,13 @@ assert_contains "filter prompt uses a real network example" "$prompt" "ip:10.42.
 assert_not_contains "filter prompt avoids story names" "$prompt" "theprof"
 assert_not_contains "filter prompt avoids old story groups" "$prompt" "name:theprof-*"
 
+# A bare group name typed at the filter prompt means group:NAME.
+assert_eq "bare group name is normalised" "$(cert_filter_normalize laptops "$keys")" "group:laptops"
+assert_eq "explicit filter is unchanged" "$(cert_filter_normalize group:admin "$keys")" "group:admin"
+assert_eq "name glob is unchanged" "$(cert_filter_normalize 'name:alpha*' "$keys")" "name:alpha*"
+assert_eq "unknown bare word is unchanged" "$(cert_filter_normalize nope "$keys")" "nope"
+assert_eq "all stays all" "$(cert_filter_normalize all "$keys")" "all"
+
 # The interactive selector still applies a chosen filter (checklist defaults on).
 # Use redirection (not a pipe) so SEL_* stays in this shell.
 cert_select_tui "$keys" <<< $'group:laptops\n\n' >/dev/null 2>"$SANDBOX/tui.err"

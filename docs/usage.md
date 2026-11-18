@@ -109,6 +109,7 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager cert expiry 30         # certs expiring within 30 days
 ./nebula-manager cert resign-all         # re-issue everything with the current CA
 ./nebula-manager cert resign-all --dry-run   # preview only; --keep-keys/--skip-device available
+./nebula-manager cert renumber --prefix 16   # rewrite the mask, keep every address
 ./nebula-manager cert config list        # per-node configs in <cert-dir>/configs
 ./nebula-manager cert config generate --all   # create/refresh every node config
 ./nebula-manager cert bundle             # list certificates that can be exported

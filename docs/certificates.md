@@ -233,6 +233,26 @@ What happens:
 | `--keep-keys` | reuse existing `<name>.key` files instead of rotating them |
 | `--skip-device` | skip certificates that have no local private key |
 
+#### Renumbering the overlay (`cert renumber`)
+
+The same machinery can rewrite the network **mask** while keeping every address,
+so a mesh that grew as separate `/24`s can move to one shared `/16`:
+
+```bash
+# what would change (e.g. 10.100.1.11/24 -> 10.100.1.11/16)
+./nebula-manager cert renumber --prefix 16 --cert-dir ~/keys/nebula --dry-run
+
+# apply: keep the private keys, no prompt
+./nebula-manager cert renumber --prefix 16 --keep-keys --cert-dir ~/keys/nebula --yes
+```
+
+- Only the prefix changes; name, address, groups, routed subnets and expiry stay.
+- **Do it for the whole mesh at once.** A `/16` host and a `/24` host cannot reach
+  each other — see [the class design](user-stories.md#the-class-design-in-one-page).
+- Redeploy the updated certificates afterwards (bundles or the Fleet menu). From
+  then on every host routes the whole prefix through its tun; no per-host
+  `ip route add` and no router forwarding is needed.
+
 After re-signing, redeploy the updated certificates (and, when keys rotated, the
 new `.key`) to the nodes — e.g. with a client bundle, the self-contained
 installer, or the Fleet menu. Nodes whose key changed must receive the new key

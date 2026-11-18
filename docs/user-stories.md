@@ -110,7 +110,8 @@ Every story below uses the same overlay model. It is deliberately boring:
 - **One CA per course** if two semesters must not trust each other; a single CA
   plus groups is enough within one class.
 - **Changing the design later:** switching an existing mesh from `/24` to `/16`
-  keeps every address — only the prefix changes (roadmap: `cert renumber --prefix 16`).
+  keeps every address — only the prefix changes:
+  `cert renumber --prefix 16 --keep-keys` (dry-run first).
 
 ---
 

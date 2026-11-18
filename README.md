@@ -137,6 +137,7 @@ Every menu action has a headless equivalent:
 | Sign a node | `nebula-manager sign --name node1 --ip 10.100.0.2/24 --groups home` |
 | Generate/refresh node configs | `nebula-manager cert config generate --all --force` |
 | Re-issue everything after a CA rotation | `nebula-manager cert resign-all --yes` |
+| Move the mesh to one prefix (e.g. /16) | `nebula-manager cert renumber --prefix 16 --keep-keys` |
 | Allow inbound only from a group | `nebula-manager cert firewall --from-group home --select all --yes` |
 | Export a client bundle | `nebula-manager cert bundle node1 --out ~/Downloads` |
 | Share a class fleet over croc | `nebula-manager fleet croc --select group:students --policy students` |
