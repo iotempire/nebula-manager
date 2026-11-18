@@ -26,8 +26,9 @@ prompts come with **suggestions derived from the existing certs**:
 - **name** — `<this-host-short-name><mesh-domain>`, where the domain is the most
   common suffix among existing cert names (e.g. `theprof-framework.theprof.mesh` when
   your certs are `vps.theprof.mesh`, `theprof-ge75.theprof.mesh`, …);
-- **IP** — the **next free /24 host** in the overlay network used by most of your
-  certs (e.g. `10.100.0.1`, `.2`, `.3` present → `10.100.0.4/24`);
+- **IP** — the **next free host** in the overlay network (same prefix) used by most
+  of your certs (e.g. `10.100.0.1`, `.2`, `.3` present → `10.100.0.4/16` when the
+  workspace uses `/16`);
 - **groups** — the workspace's existing groups are listed with member counts
   (e.g. `existing: instructor (3), lighthouse (1)`), and **Enter reuses the last
   groups you used in this workspace** (node and mobile selections are tracked

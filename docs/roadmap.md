@@ -69,6 +69,13 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       [operations.md ▸ Field notes](operations.md#-field-notes-debian-clients) and
       [dns.md](dns.md#-debian-enabling-systemd-resolved-can-break-dns): expected
       when the lighthouse is in a different overlay subnet; discovery still works.
+- [ ] **Wide default prefix for certificate addresses.** Nebula's `-ip` sets both the node's
+      address *and* the network it may talk to, so a mesh split into `/24`s silently breaks every
+      cross-range flow: the client hangs, `firewall explain` looks correct, and the cause is
+      invisible. `sign` should suggest addresses from a wide prefix (`/16`) rather than a `/24`,
+      warn when a new certificate's networks do not cover the other certificates in the same
+      workspace, and `docs/certificates.md` should state the `-ip` semantics plainly. Tailscale
+      allocates from `100.64.0.0/10` and NetBird defaults to a `/16` for the same reason.
 - [ ] **Better menu hierarchy** – revisit the top-level grouping once the fleet
       features land (the current rename to *Instances* / *Instance Settings* /
       *Updates & Install* / *Manager Setup* is the surgical first step):

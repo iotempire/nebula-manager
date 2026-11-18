@@ -59,12 +59,70 @@ reminder, e.g. *Certificates (CA, nodes, groups)* — **nodes** are mesh members
 
 ---
 
+## The class design in one page
+
+Every story below uses the same overlay model. It is deliberately boring:
+
+**One prefix for the whole mesh; certificates (groups) decide who may talk to whom.**
+
+| Block | What lives there | Cert prefix |
+|---|---|---|
+| `10.100.0.0/24` | lighthouses, theprof's machines, servers | `/16` |
+| `10.100.10.0/24` | lab 1 / student group 1 | `/16` |
+| `10.100.20.0/24` | lab 2 / student group 2 | `/16` |
+| `10.100.30.0/24` | … one block per lab | `/16` |
+
+- **Every certificate is issued with `/16`** — `10.100.10.7/16`, not `/24`. Nebula
+  then installs one route, `10.100.0.0/16 dev nebula1`, on every host, so any node
+  reaches any other at layer 3. No `unsafe_routes`, no per-host `ip route add`, no
+  router forwarding packets into a tunnel.
+- **Do not give each lab its own `/24`.** A host's tun route only covers the
+  network in its certificate, so `10.100.0.0/24` hosts cannot reach `10.100.1.0/24`
+  hosts without extra routes — and the symptom is a silent 100 % packet loss (see
+  [operations.md ▸ Field notes](operations.md#-field-notes-debian-clients)).
+- **The blocks are for humans.** They make IPs, logs and rules readable; they are
+  not routing boundaries.
+- **Groups are the credentials.** Groups are baked into the certificate at signing
+  time: `instructor`, `lighthouse`, `lab01`, `lab02`, …, `mobile`.
+- **The firewall is default-deny and group-based.** A lab PC:
+
+  ```yaml
+  firewall:
+    inbound_action: drop
+    outbound_action: drop
+    outbound:
+      - {port: any, proto: any, host: any}
+    inbound:
+      - {port: any, proto: icmp, group: instructor}
+      - {port: 22,   proto: tcp,  group: instructor}
+      - {port: any, proto: any,  group: lab01}    # same lab only
+  ```
+
+  One `group:` per rule means OR; a `groups: [a, b]` list means AND. The batch
+  firewall (`cert firewall --from-group …`) emits one rule per group for exactly
+  this reason.
+- **Lighthouses** (`10.100.0.1`) are the only fixed endpoints: every client gets
+  `static_host_map` + `lighthouse.hosts`; enable `serve_dns` on the lighthouse if
+  you want mesh names.
+- **NAT:** a lab router that NATs machines behind it needs either a UDP port
+  forward or — easier — a **relay**: the gateway sets `relay.am_relay: true` and the
+  machines behind it list it in `relay.relays`.
+- **One CA per course** if two semesters must not trust each other; a single CA
+  plus groups is enough within one class.
+- **Changing the design later:** switching an existing mesh from `/24` to `/16`
+  keeps every address — only the prefix changes (roadmap: `cert renumber --prefix 16`).
+
+---
+
 ## Story 1 — Theprof, the networking teacher
 
 **Situation.** Theprof teaches a Nebula class. He already runs Nebula by hand:
 
 - a **lighthouse** on a VPS: `vps.theprof.mesh` = `10.100.0.1`, reachable at
   `vps.theprof.demo:4545`;
+- one overlay prefix for the whole class: **`10.100.0.0/16`**, with a readable
+  block per lab (`10.100.10.x`, `10.100.20.x`, …) — every certificate is issued
+  with `/16`, so no host needs extra routes;
 - his laptop `theprof-framework.theprof.mesh` = `10.100.0.2` (a **client**);
 - an existing **CA** with certs in `~/keys/nebula` (CA name `TheprofMeshCA`);
 - Nebula runs as a **systemd service** (as the `nobody` user), so
@@ -82,8 +140,8 @@ graph TD
   U3["theprof3 - 10.100.0.4"]
   U4["theprof4 - 10.100.0.5"]
   P["theprof-android - 10.100.0.6"]
-  G1["student-group-1 - 10.101.0.0/24"]
-  G2["student-group-2 - 10.102.0.0/24"]
+  G1["lab 1 / student group 1 - 10.100.10.x/16"]
+  G2["lab 2 / student group 2 - 10.100.20.x/16"]
   L --- U1
   L --- U3
   L --- U4
@@ -106,7 +164,7 @@ Detected a running Nebula installation:
   nebula:       /usr/bin/nebula (v1.11.2)
   config:       /etc/nebula/config.yml   (service-owned; readable with sudo)
   certs:        /home/theprof/keys/nebula   (CA: TheprofMeshCA, 3 certs)
-  tun:          nebula1 (10.100.0.2/24, up)
+  tun:          nebula1 (10.100.0.2/16, up)
   lighthouse:   10.100.0.1 -> vps.theprof.demo:4545
   this host:    client (am_lighthouse: false)
 
@@ -156,8 +214,8 @@ $ nebula-manager server add vps --role lighthouse --dir /etc/nebula --host vps.t
 $ nebula-manager cert list --cert-dir ~/keys/nebula
 name,type,ips,groups,subnets,from,to
 TheprofMeshCA,CA,N/A,None,None,260929,360926
-theprof-framework.theprof.mesh,Cert,10.100.0.2/24,laptops,None,260929,360926
-vps.theprof.mesh,Cert,10.100.0.1/24,lighthouse:servers,None,260929,360926
+theprof-framework.theprof.mesh,Cert,10.100.0.2/16,laptops,None,260929,360926
+vps.theprof.mesh,Cert,10.100.0.1/16,lighthouse:servers,None,260929,360926
 ```
 
 Other subcommands: `server list` (table of `[server.*]` entries), `server remove NAME`,
@@ -171,12 +229,12 @@ the functional keys are `dir`, `service`, `enabled`.
 
 Sign certs unprivileged in the existing workspace. In the TUI the name and IP
 are **pre-filled from the existing certs** (domain suffix `.theprof.mesh`, next
-free address `10.100.0.4/24`) — just press Enter to accept:
+free address `10.100.0.4/16`) — just press Enter to accept:
 
 ```
 [?] Enter the certificate name [theprof-framework.theprof.mesh]: theprof3.theprof.mesh
-[?] Enter the IP address [10.100.0.4/24]:
-[?] Enter the IP address [10.100.0.5/24]:    # next cert, after .4 is used
+[?] Enter the IP address [10.100.0.4/16]:
+[?] Enter the IP address [10.100.0.5/16]:    # next cert, after .4 is used
 ```
 
 After signing, the tool asks which **firewall the new node's client template**
@@ -187,9 +245,9 @@ that firewall, and remembers the choice per certificate.
 
 ```bash
 $ nebula-manager sign --cert-dir ~/keys/nebula \
-      --name theprof3.theprof.mesh --ip 10.100.0.4/24 --groups laptops
+      --name theprof3.theprof.mesh --ip 10.100.0.4/16 --groups laptops
 $ nebula-manager sign --cert-dir ~/keys/nebula \
-      --name theprof4.theprof.mesh --ip 10.100.0.5/24 --groups laptops
+      --name theprof4.theprof.mesh --ip 10.100.0.5/16 --groups laptops
 
 $ nebula-manager cert bundle theprof3.theprof.mesh --out ./bundles
 $ nebula-manager cert bundle theprof4.theprof.mesh --out ./bundles
@@ -305,7 +363,7 @@ The key stays on the device: the app generates the keypair and exports only the
    ./nebula-manager sign --cert-dir ~/keys/nebula \
      --in-pub ~/theprof-android.pub \
      --name theprof-android.theprof.mesh \
-     --ip 10.100.0.6/24 --groups mobile \
+     --ip 10.100.0.6/16 --groups mobile \
      --qr ~/keys/nebula/theprof-android.png
    ```
 
@@ -331,7 +389,7 @@ The key stays on the device: the app generates the keypair and exports only the
 Notes:
 
 - The cert name follows the same convention (`theprof-android.theprof.mesh`);
-   `10.100.0.6/24` is the next free address after `.4`/`.5`.
+   `10.100.0.6/16` is the next free address after `.4`/`.5`.
 - Group `mobile` is handy for firewall rules. The current config allows all, so
    nothing else is needed here; restrict/allow `mobile` wherever inbound rules
    are tightened.
@@ -357,8 +415,8 @@ one action. Rename is just one of the actions.
 3. the preview lists exactly which certificates change and which do not:
 
    ```text
-theprof-framework.theprof.mesh.crt (10.100.0.2/24): [laptops] -> [home]
-theprof-ge75.theprof.mesh.crt      (10.100.0.3/24): [laptops] -> [home]
+theprof-framework.theprof.mesh.crt (10.100.0.2/16): [laptops] -> [home]
+theprof-ge75.theprof.mesh.crt      (10.100.0.3/16): [laptops] -> [home]
    ```
 
 4. confirm, and each match is re-signed unprivileged. Name, IP, subnets and
@@ -393,7 +451,7 @@ re-signing it explicitly (the key stays valid):
 
 ```bash
 $ nebula-manager sign --cert-dir ~/keys/nebula \
-      --name theprof-framework.theprof.mesh --ip 10.100.0.2/24 \
+      --name theprof-framework.theprof.mesh --ip 10.100.0.2/16 \
       --groups admin,home
 ```
 
@@ -491,8 +549,10 @@ directly (working copy, diff confirmation, backup when elevation is needed):
 $ nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 ```
 
-Student groups later reuse the same mechanism: a `students` pack with
-`groups: [students]` and per-group rules, embedded into every student bundle.
+Student groups later reuse the same mechanism: **one pack per lab** — a `lab01`
+pack with `groups: [lab01]` and per-group rules, embedded into every bundle of that
+lab (`--policy lab01`). A single `students` group works too if all labs may talk to
+each other; the pack is what decides, not the IP block.
 
 **From permissive to selective.** The pack above is the fine-grained route (it
 can carry ports, ICMP rules, `local_cidr`, …). For the simple “only my own
@@ -662,7 +722,7 @@ diff and asks before touching it. Verify:
 
 ```bash
 systemctl status nebula
-ip -brief addr show nebula1        # confirm 10.101.0.x/24
+ip -brief addr show nebula1        # confirm 10.100.10.x/16
 ```
 
 **Optional — the classic manager route.** Clone the repo and import the bundle
@@ -725,7 +785,7 @@ supported install path.
    ./nebula-manager sign --cert-dir ~/keys/nebula \
      --in-pub ~/dana-iphone.pub \
      --name dana-iphone.student-group-1.theprof.mesh \
-     --ip 10.101.0.10/24 --groups students \
+     --ip 10.100.10.10/16 --groups students \
      --qr ~/keys/nebula/dana-iphone.png
    ```
 
@@ -733,13 +793,14 @@ supported install path.
    the cert in the **Certificate** screen, pastes `ca.crt` in the **CA** screen,
    and adds the lighthouse (`10.100.0.1` → `vps.theprof.demo:4545`).
 5. Save, allow the VPN configuration, and enable the site. Verify from another
-   group member: `ping 10.101.0.10`.
+   group member: `ping 10.100.10.10`.
 
 Notes:
 
 - The bundle `.zip` is for the desktop Nebula binary; mobile students get the
    cert + CA (+ optional QR), not the zip.
-- `10.101.0.10/24` is a free address in group 1's /24 (pick any unused one).
+- `10.100.10.10/16` is a free address in lab 1's block (`10.100.10.0/24` inside the
+  shared `/16`; pick any unused one).
 - Android works the same way (see Story 1, Phase 2b); the mobile app is **not**
    on F-Droid.
 

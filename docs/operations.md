@@ -63,15 +63,16 @@ Looking for more answers? Check the [Full FAQ on GitHub Wiki »](https://github.
 - **`Device "nebula1" does not exist` right after a start** — the TUN device is
   created a moment later. Re-check with `ip -4 addr show nebula1` once
   `systemctl is-active nebula.service` reports `active`.
-- **All hosts must share an overlay network.** Nebula routes at layer 3 and the
+- **All hosts must share one overlay prefix.** Nebula routes at layer 3 and the
   tun route only covers the network in the certificate (`10.100.1.11/24` →
-  `10.100.1.0/24`). A node certified into `10.100.1.0/24` is therefore
-  unreachable from `10.100.0.0/24` hosts — no firewall change helps — and the
-  daemon logs `lighthouse host is not within our networks`. Sign every node into
-  the same /24 as the lighthouse (the IP prompt suggests a free address from the
-  network in use), or add `tun.unsafe_routes` on every peer. `nebula-manager
-  sign` warns when an address falls outside the networks already in the
-  workspace.
+  `10.100.1.0/24`). A node certified into `10.100.1.0/24` is unreachable from
+  `10.100.0.0/24` hosts — no firewall change helps — and the daemon logs
+  `lighthouse host is not within our networks`. For a class, issue **every**
+  certificate with the same wide prefix (`10.100.0.0/16`) and treat the `/24`
+  blocks as readable ranges only — see
+  [the class design](user-stories.md#the-class-design-in-one-page). The
+  alternative is `tun.unsafe_routes` on every peer. `nebula-manager sign` warns
+  when an address falls outside the networks already in the workspace.
 
 ---
 
