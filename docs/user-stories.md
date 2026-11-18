@@ -669,6 +669,22 @@ student into the class chat; `Ctrl-C` stops the remaining senders. Mobile certs
 bundles and codes without starting any transfer, or `--timeout 600` to stop
 after ten minutes.
 
+The first classroom-sized run taught one lesson: croc's **public** relay limits
+admissions per source IP, and a lab is one source IP, so a burst of students ends
+in `relay admission rejected`. theprof therefore runs his own relay (the VPS he
+already has) and passes it once:
+
+```bash
+$ croc relay --host 0.0.0.0 --ports 9009,9010,9011,9012,9013   # once, on the VPS
+$ nebula-manager fleet croc --relay vps.theprof.mesh:9009 --select group:students
+```
+
+The printed student lines then include `--relay`. Inside a single lab VLAN
+`--local` is even simpler (multicast discovery, no internet), and `--delay 5`
+spaces the senders out when the public relay has to be used anyway. A shared
+archive for everybody is deliberately **not** offered: a bundle carries one
+certificate, so two machines would end up with the same overlay IP.
+
 For an **already-installed** node he can push a firewall change over SSH instead
 of handing out a bundle:
 

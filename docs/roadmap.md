@@ -50,7 +50,19 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       attached to GitHub Releases and supports a one-`curl` install/update.
 - [ ] **Real-network confirmation for fleet** – run `fleet croc` between two
       machines over croc's relay (including behind eduroam/NAT) and run
-      `fleet ssh` against a node with key auth + passwordless sudo.
+      `fleet ssh` against a node with key auth + passwordless sudo. **Partially
+      done:** the public pool answered `relay admission rejected` on a first
+      classroom-sized run, which is why `--relay`, `--local` and `--delay` exist.
+      Still to confirm: own relay (`croc relay` on the VPS) with a full class, and
+      `--local` inside one lab VLAN.
+- [ ] **`fleet pack` – one archive for the whole class.** A bundle is bound to one
+      certificate, so “download once, everybody gets it” needs a different
+      artifact: one archive with a folder per node (`cert`, `key`, rendered
+      `config.yml`, `install.*`), which `croc store --downloads N`, a plain
+      `python3 -m http.server` or copyparty can hand out to everybody. Students
+      unpack their own folder. Would also give the teacher a single “class state”
+      file to re-issue later. (`croc store` alone is not enough: the public store
+      allows five upload creations per hour and two unfinished uploads per IP.)
 - [x] **Linux bundle installer provides the systemd unit.** Field report
       2026-11-17 (Debian, release tarball): `install.sh` now writes
       `/etc/systemd/system/<unit>` with the detected `ExecStart` and the installed

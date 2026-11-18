@@ -48,6 +48,84 @@ are written next to the bundles as `.croc-<node>.log`.
 > `.bundle-<node>.log`. After the table it waits for students by design; that
 > second wait is not a hang.
 
+#### Relays: the public one can refuse you
+
+croc's public relay rate-limits admissions. A class starting at the same moment
+can hit `relay admission rejected` / `could not connect`, and the transfer fails
+(croc exits `0` in that case — the tool now reports it as a failure). Run your
+own relay on a host with a reachable IP (the VPS, or a machine in the lab) and
+use it on **both** sides:
+
+```bash
+# once, on the relay host (TCP 9009-9013; 9009 is the main port)
+croc relay --host 0.0.0.0 --ports 9009,9010,9011,9012,9013
+
+# teacher: serve every bundle through that relay
+nebula-manager fleet croc --relay vps.theprof.demo:9009 --select group:students
+
+# student: same relay, then the code
+croc --relay vps.theprof.demo:9009 CODE
+```
+
+`CROC_RELAY=host:9009` works as a default for the manager, and the printed
+“Students run” lines already include `--relay …` when one is set. Only a relay the
+students can reach is useful — on a lab LAN, the teacher's machine is often the
+fastest relay and needs no internet at all.
+
+#### Three levers against the rate limit
+
+In order of usefulness:
+
+1. **A relay you control** (above). This is the fix. The public pool limits
+   admissions per *source IP*, and a whole lab shares the campus NAT address, so
+   every student looks like one impatient client.
+2. **`--local`** for a lab LAN: croc uses multicast discovery plus a relay on the
+   teacher's machine and never contacts the internet. Works only inside one
+   broadcast domain — the lab VLAN yes, eduroam-to-lab no.
+
+   ```bash
+   nebula-manager fleet croc --local --select group:students
+   ```
+
+   The printed receive command then starts with `croc --local`, so students on
+   the same LAN can receive without any relay.
+3. **`--delay SECONDS`** spaces the senders apart (`--delay 5`): thirty joins
+   become a slow ramp instead of a burst. It lowers the chance of hitting the
+   limit, it does not remove it — every sender still waits for its own student, so
+   with `--delay 5` the last code only starts after two and a half minutes.
+
+If all of that is still awkward, plain HTTP is a perfectly good classroom server
+and needs no protocol at all — publish the output directory and hand out the URL:
+
+```bash
+python3 -m http.server 8000 --directory fleet-bundles-20261025-101500
+```
+
+A student then runs `wget http://TEACHER-IP:8000/alice.theprof.mesh-nebula-bundle.zip`.
+On a shared/untrusted network that also means the archives are readable by
+anyone on that network — the ZIP **does** contain the client private key, so use
+it on a lab LAN, not on eduroam. (The bundles are protected by the fact that the
+file name is only known to the class, which is not a security boundary; the CA key
+is never in a bundle.)
+
+#### Why there is no single bundle for the whole class
+
+`croc store --downloads N --expiration 1d` exists (one upload, N downloads, plus a
+browser link) and looks like the obvious answer, but it does not fit here:
+
+- **A bundle is bound to one certificate.** Sharing one archive means every
+  machine installs the same certificate and therefore the same overlay IP. Two
+  such hosts on one mesh fight over the address.
+- **Public stored transfers are rate limited too:** five upload creations per hour
+  and two unfinished uploads per source IP by default. Thirty per-node uploads do
+  not fit, and a self-hosted store (`croc store --url`) is yet another service to
+  run.
+
+The workable “download once, everybody gets it” shape is one **class pack**: a
+single archive holding one folder per node (`alice.theprof.mesh/{*.crt,*.key,*.yml,
+install.sh}`), distributed by `croc store`, HTTP or copyparty; each student
+unpacks their own folder. It is on the roadmap (`fleet pack`).
+
 - Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
   `ip:CIDR`, `cert:NAME`, or `all` (repeatable). A bare existing group name
   (`ulno`) is accepted as `group:ulno`. Mobile certs (no local `.key`)
@@ -58,7 +136,9 @@ are written next to the bundles as `.croc-<node>.log`.
   detected host firewall.
 - `--out DIR` (default `./fleet-bundles-<timestamp>`, which is git-ignored
   along with its `.croc-*.log` / `.bundle-*.log` files because the archives
-  contain private keys), `--code-prefix TEXT`, `--timeout SECONDS` (default:
+  contain private keys), `--relay HOST[:PORT]` (own croc relay; both sides must
+  use it), `--local` (LAN only, no public relay), `--delay SECONDS` (pause
+  between senders), `--code-prefix TEXT`, `--timeout SECONDS` (default:
   wait forever), `--dry-run` (create bundles and print codes/commands, start no
   senders).
 - Each student runs the code, extracts the archive and runs the installer:

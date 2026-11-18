@@ -47,6 +47,9 @@ if [[ "${CROC_USAGE_NOTICE:-0}" == 1 ]]; then
     echo "On UNIX systems, to send with a custom code phrase,"
     echo "you need to set the environmental variable CROC_SECRET:"
 fi
+if [[ "${CROC_RELAY_FAIL:-0}" == 1 ]]; then
+    echo "relay connection failed: could not connect to 1.getcroc.com:9009: relay admission rejected" >&2
+fi
 exit 0
 MOCK
 chmod +x "$SANDBOX/bin/croc"
@@ -99,6 +102,30 @@ assert_not_contains "usage notice is not a delivery" "$out" "Delivered alice.mes
 assert_contains "usage notice is diagnosed" "$out" "rejected the custom code"
 
 assert_eq "no sudo used" "$(sudo_count)" "0"
+
+# --- own relay ---------------------------------------------------------------
+: > "$CROC_LOG"
+out="$(fleet_croc_cli --select cert:alice.mesh --relay 10.9.9.9:9009 \
+    --out "$SANDBOX/fleet-relay" 2>&1)"
+assert_contains "sender invokes the relay" "$(cat "$CROC_LOG")" "--relay 10.9.9.9:9009"
+assert_contains "printed receiver command carries the relay" "$out" "croc --relay 10.9.9.9:9009"
+assert_contains "relay is announced" "$out" "Relay: 10.9.9.9:9009"
+
+# A relay that refuses (croc exits 0 anyway) must not be reported as delivered.
+: > "$CROC_LOG"
+out="$(CROC_RELAY_FAIL=1 fleet_croc_cli --select cert:alice.mesh \
+    --out "$SANDBOX/fleet-relayfail" 2>&1)"
+assert_not_contains "relay refusal is not a delivery" "$out" "Delivered alice.mesh"
+assert_contains "relay refusal is diagnosed" "$out" "Relay refused alice.mesh"
+assert_contains "relay refusal suggests --relay" "$out" "--relay HOST:PORT"
+
+# --- LAN-only mode -----------------------------------------------------------
+: > "$CROC_LOG"
+out="$(fleet_croc_cli --select cert:alice.mesh --local --out "$SANDBOX/fleet-local" 2>&1)"
+assert_contains "sender uses --local" "$(cat "$CROC_LOG")" "--local"
+assert_contains "printed receiver command uses --local" "$out" "croc --local"
+assert_contains "LAN-only mode is announced" "$out" "LAN only (--local)"
+assert_contains "HTTP fallback is suggested" "$out" "python3 -m http.server"
 
 # Regression: bundle creation redirects stderr to a log. An unreadable local
 # Nebula config must not sit on an invisible [y/N] prompt (looked like a hang).

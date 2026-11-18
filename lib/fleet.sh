@@ -105,6 +105,11 @@ Firewall in the generated client config:
 
 Serving:
   --out DIR            Bundle directory (default: ./fleet-bundles-<timestamp>)
+  --relay HOST[:PORT]  Use this croc relay for all transfers (default: croc's
+                       public relay, env CROC_RELAY). Both sides must use it.
+  --local              LAN only: no public relay (croc prints/uses a local relay
+                       and multicast discovery). Best in a classroom LAN.
+  --delay SECONDS      Pause between starting senders (helps with relay rate limits)
   --code-prefix TEXT   Prefix for croc codes (default: the certificate name)
   --timeout SECONDS    Stop waiting after N seconds (default: wait forever)
   --dry-run            Create the bundles and print codes/commands; start nothing
@@ -116,6 +121,7 @@ EOF
 
 fleet_croc_cli() {
     local cert_dir="" out_dir="" policy="" fw_mode="" code_prefix="" timeout=0 dry=0
+    local relay="${CROC_RELAY:-}" local_only=0 delay=0
     local -a selects=() excludes=()
     while (( $# )); do
         case "$1" in
@@ -133,6 +139,12 @@ fleet_croc_cli() {
             --out=*)       out_dir="${1#*=}" ;;
             --code-prefix) shift; code_prefix="${1:-}" ;;
             --code-prefix=*) code_prefix="${1#*=}" ;;
+            --relay)       shift; relay="${1:-}" ;;
+            --relay=*)     relay="${1#*=}" ;;
+            --local)       local_only=1 ;;
+            --no-local)    local_only=0 ;;
+            --delay)       shift; delay="${1:-0}" ;;
+            --delay=*)     delay="${1#*=}" ;;
             --timeout)     shift; timeout="${1:-0}" ;;
             --timeout=*)   timeout="${1#*=}" ;;
             --dry-run|-n)  dry=1 ;;
@@ -142,6 +154,7 @@ fleet_croc_cli() {
         shift
     done
     [[ "$timeout" =~ ^[0-9]+$ ]] || { log_error "--timeout must be a number of seconds"; return 2; }
+    [[ "$delay" =~ ^[0-9]+$ ]] || { log_error "--delay must be a number of seconds"; return 2; }
     cert_dir="${cert_dir:-$(resolve_cert_dir)}"
     (( ${#selects[@]} )) || selects=(all)
 
@@ -236,7 +249,11 @@ fleet_croc_cli() {
         for i in "${!names[@]}"; do
             # croc 11.x rejects `send --code CODE` (it prints a usage notice and
             # exits 0); a custom code phrase must be passed via CROC_SECRET.
-            CROC_SECRET="${codes[i]}" croc --yes send "${bundles[i]}" \
+            local -a croc_args=( --yes send "${bundles[i]}" )
+            [[ -n "$relay" ]] && croc_args=( --relay "$relay" "${croc_args[@]}" )
+            (( local_only )) && croc_args=( --local "${croc_args[@]}" )
+            if (( delay > 0 && i > 0 )); then sleep "$delay"; fi
+            CROC_SECRET="${codes[i]}" croc "${croc_args[@]}" \
                 >"$out_dir/.croc-${names[i]}.log" 2>&1 &
             FLEET_PIDS+=($!)
             live+=("${names[i]}|${codes[i]}|${bundles[i]}|${FLEET_PIDS[${#FLEET_PIDS[@]}-1]}")
@@ -252,8 +269,15 @@ fleet_croc_cli() {
     done
     printf '\nStudents run:\n'
     for i in "${!names[@]}"; do
-        printf '  croc %s    # %s\n' "${codes[i]}" "${names[i]}"
+        printf '  croc %s%s%s    # %s\n' "${relay:+--relay $relay }" \
+            "$([[ $local_only == 1 ]] && printf -- '--local ')" "${codes[i]}" "${names[i]}"
     done
+    [[ -n "$relay" ]] && printf '\nRelay: %s (both sides must use it)\n' "$relay"
+    if (( local_only )); then
+        printf '\nMode: LAN only (--local). Sender and student must be on the same network;\n'
+        printf '      croc uses multicast discovery and a local relay, no public relay.\n'
+    fi
+    printf '\nNo codes wanted? Serve this folder instead:\n  python3 -m http.server 8000 --directory %q\n' "$out_dir"
     if (( dry )); then
         printf '\nDry run: bundles were created, no croc processes were started.\n'
         for f in "${temp_files[@]:-}"; do [[ -n "$f" ]] && rm -f "$f"; done
@@ -262,13 +286,14 @@ fleet_croc_cli() {
 
     printf '\nWaiting for receivers (Ctrl-C to stop)...\n'
     local -a remaining=("${live[@]}")
-    local entry rc n c p setup_failed
+    local entry rc n c p setup_failed relay_failed
     while (( ${#remaining[@]} > 0 )); do
         local -a next=()
         for entry in "${remaining[@]}"; do
             IFS='|' read -r n c _b p <<< "$entry"
             if _fleet_pid_finished "$p"; then
                 setup_failed=0
+                relay_failed=0
                 if wait "$p"; then rc=0; else rc=$?; fi
                 # Guard against croc printing a usage notice and exiting 0, which
                 # would otherwise be reported as a successful delivery.
@@ -276,10 +301,17 @@ fleet_croc_cli() {
                         "$out_dir/.croc-$n.log" 2>/dev/null; then
                     rc=1; setup_failed=1
                 fi
+                # croc can also exit 0 when the relay refuses the transfer.
+                if (( rc == 0 )) && grep -qiE 'relay connection failed|relay admission rejected|could not connect' \
+                        "$out_dir/.croc-$n.log" 2>/dev/null; then
+                    rc=1; relay_failed=1
+                fi
                 if (( rc == 0 )); then
                     log_success "Delivered $n (code $c)"
                 elif (( setup_failed )); then
                     log_error "croc rejected the custom code for $n - see $out_dir/.croc-$n.log (update croc?)"
+                elif (( relay_failed )); then
+                    log_error "Relay refused $n - see $out_dir/.croc-$n.log; run your own relay (croc relay) and pass --relay HOST:PORT"
                 else
                     log_error "Transfer failed for $n (code $c) - see $out_dir/.croc-$n.log"
                 fi
@@ -785,12 +817,20 @@ fleet_croc_tui() {
     local pchoice
     pchoice="$(ui_menu "Fleet croc" "Firewall for these bundles:" "${policy_opts[@]}")" || return 0
 
+    local relay
+    relay="$(ui_input "Fleet croc" "Relay (host[:port], 'local' for LAN-only, empty = public):" "${CROC_RELAY:-}")" || return 0
+
     local default_out; default_out="$PWD/fleet-bundles-$(date +%Y%m%d-%H%M%S)"
     local out; out="$(ui_input "Fleet croc" "Output directory:" "$default_out")" || return 0
     [[ -z "$out" ]] && out="$default_out"
 
     local -a args=( --cert-dir "$cert_dir" --out "$out" )
     local n
+    if [[ "$relay" == "local" ]]; then
+        args+=( --local )
+    elif [[ -n "$relay" ]]; then
+        args+=( --relay "$relay" )
+    fi
     for n in "${SEL_NAMES[@]}"; do args+=( --select "cert:$n" ); done
     [[ "$pchoice" == __saved__ ]] || args+=( --firewall "$pchoice" )
     fleet_croc_cli "${args[@]}"
