@@ -10,6 +10,8 @@
 #   group:G   / has:G       certificates carrying group G
 #   without:G / missing:G   certificates that do NOT carry group G
 #   name:GLOB               certificate name glob (e.g. name:theprof-*)
+#                           a bare name:TOKEN without wildcards matches exactly
+#                           first and falls back to *TOKEN* when nothing matches
 #   ip:CIDR | ip:ADDR       an overlay address inside CIDR / exactly ADDR
 #   cert:NAME               exact certificate name (case-insensitive)
 #   NAME                    bare value = exact certificate name
@@ -125,28 +127,55 @@ cert_select() {
     done
 
     SEL_FILES=(); SEL_NAMES=(); SEL_IPS=(); SEL_GROUPS=()
-    local i spec hit excluded
-    for i in "${!all_files[@]}"; do
-        hit=0
-        for spec in "${selects[@]}"; do
-            if _sel_match "$spec" "${all_names[i]}" "${all_ips[i]}" "${all_groups[i]}"; then
-                hit=1; break
-            fi
+    # Up to two passes. A bare `name:foo` (no glob metacharacter) that matches
+    # nothing is retried as `*foo*`: typing `name:zbook` for the certificate
+    # `ulno-zbook.ulno.mesh` is the obvious intent, and an exact miss should not
+    # be a dead end. A spec that matches on the first pass is never relaxed.
+    local pass relaxed i spec hit excluded pat
+    local -a attempt=("${selects[@]}")
+    for pass in 1 2; do
+        SEL_FILES=(); SEL_NAMES=(); SEL_IPS=(); SEL_GROUPS=()
+        for i in "${!all_files[@]}"; do
+            hit=0
+            for spec in "${attempt[@]}"; do
+                if _sel_match "$spec" "${all_names[i]}" "${all_ips[i]}" "${all_groups[i]}"; then
+                    hit=1; break
+                fi
+            done
+            (( hit )) || continue
+            excluded=0
+            for spec in "${excludes[@]}"; do
+                if _sel_match "$spec" "${all_names[i]}" "${all_ips[i]}" "${all_groups[i]}"; then
+                    excluded=1; break
+                fi
+            done
+            (( excluded )) && continue
+            SEL_FILES+=("${all_files[i]}")
+            SEL_NAMES+=("${all_names[i]}")
+            SEL_IPS+=("${all_ips[i]}")
+            SEL_GROUPS+=("${all_groups[i]}")
         done
-        (( hit )) || continue
-        excluded=0
-        for spec in "${excludes[@]}"; do
-            if _sel_match "$spec" "${all_names[i]}" "${all_ips[i]}" "${all_groups[i]}"; then
-                excluded=1; break
+        if (( ${#SEL_FILES[@]} > 0 )); then
+            if (( pass == 2 )); then
+                log_info "No exact name match - '${pat}' was matched as a substring (${#SEL_NAMES[@]} certificate(s))."
             fi
+            return 0
+        fi
+        (( pass == 1 )) || break
+        relaxed=0
+        for i in "${!attempt[@]}"; do
+            spec="${attempt[i]}"
+            case "$spec" in
+                name:*)
+                    pat="${spec#name:}"
+                    if [[ "$pat" != *'*'* && "$pat" != *'?'* && "$pat" != *'['* ]]; then
+                        attempt[i]="name:*$pat*"; relaxed=1
+                    fi ;;
+            esac
         done
-        (( excluded )) && continue
-        SEL_FILES+=("${all_files[i]}")
-        SEL_NAMES+=("${all_names[i]}")
-        SEL_IPS+=("${all_ips[i]}")
-        SEL_GROUPS+=("${all_groups[i]}")
+        (( relaxed )) || break
     done
-    (( ${#SEL_FILES[@]} > 0 ))
+    return 1
 }
 
 # _ipv4_network <addr[/prefix]> ; print the network address/prefix (IPv4).
@@ -250,7 +279,7 @@ cert_select_filter_prompt() {
     printf 'Groups: %s\n' "$group_list"
     printf 'Networks: %s\n' "$net_list"
     printf 'Filter: all | group:NAME | without:NAME | name:GLOB | ip:CIDR | cert:NAME\n'
-    printf 'Examples: group:example-group  name:example-host-*  ip:%s' "$ip_example"
+    printf 'Examples: group:example-group  name:*zbook*  name:node-*  ip:%s' "$ip_example"
 }
 
 # cert_filter_normalize <spec> <cert_dir> : a bare group name becomes group:NAME.
@@ -289,6 +318,7 @@ cert_select_tui() {
             break
         fi
         log_warn "No certificate matches '$spec' in $cert_dir."
+        log_info "name: takes a glob (name:*zbook*); a bare name:zbook also falls back to that."
         ui_yesno "Select certificates" "Try a different filter?" || return 1
     done
 

@@ -105,6 +105,15 @@ assert_eq "selector: without" "$(sel_names)" "gamma.mesh"
 cert_select "$keys" --select name:al\* >/dev/null
 assert_eq "selector: name glob" "$(sel_names)" "alpha.mesh"
 
+# A bare name:TOKEN is exact first, then a substring - `name:lph` finds
+# alpha.mesh, and an exact spec is never widened.
+cert_select "$keys" --select name:beta.mesh >/dev/null
+assert_eq "selector: bare name: is exact first" "$(sel_names)" "beta.mesh"
+cert_select "$keys" --select name:lph >/dev/null
+assert_eq "selector: bare name: falls back to a substring" "$(sel_names)" "alpha.mesh"
+cert_select "$keys" --select name:zzz >/dev/null; rc=$?
+assert_ne "selector: an unknown name still matches nothing" "$rc" "0"
+
 cert_select "$keys" --select ip:10.42.0.0/30 >/dev/null
 assert_eq "selector: ip CIDR containment" "$(sel_names)" "alpha.mesh,beta.mesh"
 

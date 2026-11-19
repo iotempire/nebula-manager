@@ -173,7 +173,7 @@ Selector grammar (repeat `--select` to union; `--exclude` subtracts):
 | `all` | every non-CA certificate |
 | `group:G` / `has:G` | certificates carrying group G |
 | `without:G` / `missing:G` | certificates **not** carrying G |
-| `name:GLOB` | certificate-name glob (`name:theprof-*`) |
+| `name:GLOB` | certificate-name glob (`name:theprof-*`); a bare `name:token` without wildcards matches exactly first and then falls back to `*token*`, so `name:zbook` finds `ulno-zbook.ulno.mesh` |
 | `ip:CIDR` / `ip:ADDR` | overlay address inside the CIDR / exactly ADDR |
 | `cert:NAME` / `NAME` | exact certificate name (case-insensitive) |
 

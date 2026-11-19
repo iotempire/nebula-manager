@@ -53,8 +53,9 @@ Hand them out:
 
 Selection uses the usual grammar: `group:G`, `without:G`, `name:GLOB`,
 `ip:CIDR`, `cert:NAME`, or `all` (repeatable); a bare existing group name
-(`ulno`) is accepted as `group:ulno`. Mobile certs (no local `.key`) are skipped
-with a note - they are set up with a QR code instead
+(`ulno`) is accepted as `group:ulno`, and a bare `name:zbook` (no wildcard) that
+matches nothing exactly is retried as `name:*zbook*`. Mobile certs (no local
+`.key`) are skipped with a note - they are set up with a QR code instead
 ([mobile.md](mobile.md)).
 
 The **firewall** in every generated config comes from, in order: `--policy PACK`,
