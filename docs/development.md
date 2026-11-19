@@ -185,7 +185,7 @@ when available).
 
 This repository is **`iotempire/nebula-manager`**, a fork of
 [`jordanhillis/nebula-manager`](https://github.com/jordanhillis/nebula-manager).
-The academic edition (v2.0.0) sits directly on top of upstream's `main`;
+The academic edition sits directly on top of upstream's `main`;
 upstream's v1.1.0 tip is part of this history.
 
 ```bash

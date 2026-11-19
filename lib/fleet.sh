@@ -706,15 +706,90 @@ fleet_tcp_open() {
 }
 
 fleet_ssh_opts() {
-    printf '%s\n' -o BatchMode=yes -o ConnectTimeout=5 \
-        -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey
+    local -a o=( -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new )
+    if (( ${FLEET_AUTH_INTERACTIVE:-0} )); then
+        o+=( -o PreferredAuthentications=publickey,password,keyboard-interactive
+              -o NumberOfPasswordPrompts=3 )
+    else
+        o+=( -o BatchMode=yes -o PreferredAuthentications=publickey )
+    fi
+    printf '%s\n' "${o[@]}"
+}
+
+# --- ssh auth modes ---------------------------------------------------------
+# FLEET_AUTH_INTERACTIVE=1
+#   Allow password / keyboard-interactive logins and keep ONE ssh connection
+#   (ControlMaster) open, so the password is typed once and the remote sudo
+#   timestamp can be warmed once. Without it everything is key-only.
+# FLEET_SUDO_TTY=1
+#   Privileged remote commands need a TTY (sudo with a password or `requiretty`).
+FLEET_AUTH_INTERACTIVE=${FLEET_AUTH_INTERACTIVE:-0}
+FLEET_SUDO_TTY=${FLEET_SUDO_TTY:-0}
+FLEET_SSH_MASTER=${FLEET_SSH_MASTER:-}
+
+# _fleet_ssh_master_start <user> <host> <port>
+# Open a reusable connection (asks for the ssh password at most once).
+_fleet_ssh_master_start() {
+    local user="$1" host="$2" port="$3" sock i
+    (( FLEET_AUTH_INTERACTIVE )) || return 0
+    [[ -n "$FLEET_SSH_MASTER" ]] && return 0
+    sock="${TMPDIR:-/tmp}/nm-ssh-$$-${RANDOM}"
+    log_info "Opening one SSH session to $user@$host (password prompts happen here, once)..."
+    # -N: no remote command, just the multiplexed connection.
+    ssh -M -S "$sock" -N -o ControlPersist=600 -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=accept-new \
+        -o PreferredAuthentications=publickey,password,keyboard-interactive \
+        -o NumberOfPasswordPrompts=3 -p "$port" "$user@$host" &
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [[ -e "$sock" ]] && break
+        sleep 1
+    done
+    if [[ ! -e "$sock" ]]; then
+        log_warn "Could not open the shared SSH session; each step will ask for the password separately."
+        return 1
+    fi
+    FLEET_SSH_MASTER="$sock"
+    return 0
+}
+
+_fleet_ssh_master_stop() {
+    [[ -n "$FLEET_SSH_MASTER" ]] || return 0
+    ssh -S "$FLEET_SSH_MASTER" -O exit "x" >/dev/null 2>&1 || true
+    rm -f "$FLEET_SSH_MASTER" 2>/dev/null || true
+    FLEET_SSH_MASTER=""
 }
 
 # _fleet_ssh <user> <host> <port> <command...>
 _fleet_ssh() {
     local user="$1" host="$2" port="$3"; shift 3
-    ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-        -o PreferredAuthentications=publickey -p "$port" "$user@$host" "$@"
+    local -a o=()
+    mapfile -t o < <(fleet_ssh_opts)
+    if [[ -n "$FLEET_SSH_MASTER" ]]; then
+        ssh -S "$FLEET_SSH_MASTER" "${o[@]}" -p "$port" "$user@$host" "$@"
+    else
+        ssh "${o[@]}" -p "$port" "$user@$host" "$@"
+    fi
+}
+
+# _fleet_ssh_tty ... ; same, but allocate a remote TTY (sudo can prompt).
+_fleet_ssh_tty() {
+    local user="$1" host="$2" port="$3"; shift 3
+    local -a o=()
+    mapfile -t o < <(fleet_ssh_opts)
+    if [[ -n "$FLEET_SSH_MASTER" ]]; then
+        ssh -tt -S "$FLEET_SSH_MASTER" "${o[@]}" -p "$port" "$user@$host" "$@"
+    else
+        ssh -tt "${o[@]}" -p "$port" "$user@$host" "$@"
+    fi
+}
+
+# _fleet_run_priv <remote command...> ; run with the probed sudo prefix.
+_fleet_run_priv() {
+    if (( FLEET_SUDO_TTY )); then
+        _fleet_ssh_tty "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "$@"
+    else
+        _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "$@"
+    fi
 }
 
 _fleet_ssh_ok() {
@@ -799,6 +874,10 @@ fleet_probe() {
     done
 
     local found_user="" found_host=""
+    # Discovery is key-only on purpose: with password auth enabled ssh would
+    # prompt for every candidate user.
+    local _saved_interactive="$FLEET_AUTH_INTERACTIVE"
+    FLEET_AUTH_INTERACTIVE=0
     for h in "${open[@]}"; do
         for u in "${uuniq[@]}"; do
             log_info "Trying $u@$h (key auth)..."
@@ -807,12 +886,26 @@ fleet_probe() {
             fi
         done
     done
+    if [[ -z "$found_user" && "$_saved_interactive" == 1 ]]; then
+        # Interactive mode: retry with password auth. ssh prompts for each
+        # candidate in turn; the first success wins.
+        FLEET_AUTH_INTERACTIVE=1
+        log_info "No key worked; trying a password login (you will be prompted)."
+        for h in "${open[@]}"; do
+            for u in "${uuniq[@]}"; do
+                if _fleet_ssh "$u" "$h" "$port" true >/dev/null 2>&1; then
+                    found_user="$u"; found_host="$h"; break 2
+                fi
+            done
+        done
+    fi
+    FLEET_AUTH_INTERACTIVE="$_saved_interactive"
     if [[ -z "$found_user" ]]; then
         # Offer one interactive attempt (e.g. a personal account not in the
         # candidate list). Non-interactive callers use --user.
         if [[ -t 0 ]]; then
             local asked
-            read -rp "$(show_status 'question') No key login worked. Try another user: " asked || asked=""
+            read -rp "$(show_status 'question') No login worked. Try another user: " asked || asked=""
             if [[ -n "$asked" ]] && _fleet_user_valid "$asked"; then
                 for h in "${open[@]}"; do
                     if _fleet_ssh_ok "$asked" "$h" "$port"; then
@@ -823,27 +916,54 @@ fleet_probe() {
         fi
     fi
     if [[ -z "$found_user" ]]; then
-        log_error "Port $port is open, but no key-based login worked for: ${uuniq[*]}"
+        log_error "Port $port is open, but no login worked for: ${uuniq[*]}"
         log_info "Set up a key first: ssh-copy-id USER@${open[0]}"
-        log_info "Then retry, or pass --user USER --host HOST."
+        log_info "Then retry, or pass --user USER --host HOST / --interactive."
         return 1
-    fi
-
-    local sudo_prefix=""
-    if [[ "$found_user" != "root" ]]; then
-        if ! _fleet_ssh "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
-            log_error "$found_user@$found_host requires a password for sudo."
-            log_info "Unattended changes need passwordless sudo (sudoers) or root login."
-            return 1
-        fi
-        sudo_prefix="sudo -n"
     fi
 
     FLEET_HOST="$found_host"
     FLEET_USER="$found_user"
     FLEET_PORT="$port"
+
+    local sudo_prefix=""
+    if [[ "$found_user" != "root" ]]; then
+        if _fleet_ssh "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
+            sudo_prefix="sudo -n"
+        elif (( FLEET_AUTH_INTERACTIVE )); then
+            # Warm the remote sudo timestamp once (a shared SSH session keeps
+            # the ssh password prompt single), then keep using sudo -n.
+            _fleet_ssh_master_start "$found_user" "$found_host" "$port" || true
+            log_info "$found_user@$found_host: sudo may ask for a password now (once)."
+            if _fleet_ssh_tty "$found_user" "$found_host" "$port" "sudo -v" \
+                && _fleet_ssh "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
+                sudo_prefix="sudo -n"
+            elif _fleet_ssh_tty "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
+                # sudo works with a TTY but does not cache (`requiretty`).
+                FLEET_SUDO_TTY=1
+                sudo_prefix="sudo"
+            else
+                log_error "$found_user@$found_host did not grant sudo."
+                log_info "Log in as root, grant passwordless sudo, or add the user to sudoers."
+                _fleet_ssh_master_stop
+                return 1
+            fi
+        else
+            log_error "$found_user@$found_host requires a password for sudo."
+            log_info "Unattended changes need passwordless sudo (sudoers) or root login."
+            log_info "Re-run with --interactive to type the sudo password on the remote host."
+            return 1
+        fi
+    fi
+
     FLEET_SUDO="$sudo_prefix"
-    log_success "Using $FLEET_USER@$FLEET_HOST:$FLEET_PORT${FLEET_SUDO:+ (passwordless sudo)}"
+    local _mode="key auth"
+    (( FLEET_AUTH_INTERACTIVE )) && _mode="interactive auth"
+    local _sudo="no sudo needed"
+    if [[ -n "$sudo_prefix" ]]; then
+        if (( FLEET_SUDO_TTY )); then _sudo="sudo (TTY)"; else _sudo="passwordless sudo"; fi
+    fi
+    log_success "Using $FLEET_USER@$FLEET_HOST:$FLEET_PORT ($_mode, $_sudo)"
     return 0
 }
 
@@ -871,6 +991,9 @@ Connection / safety:
   --domain DOMAIN        Also try <target>.DOMAIN (repeatable)
   --user USER            Extra login candidate (repeatable)
   --port N               SSH port (default: 22)
+  --interactive          Allow password/keyboard-interactive logins and let
+                         sudo ask for a password on the remote host (one shared
+                         SSH session; typed once). Without it: keys + sudo -n.
   --service NAME         systemd unit (default: nebula.service)
   --yes                  Do not ask before applying
   --dry-run              Show the planned remote commands; change nothing
@@ -889,13 +1012,14 @@ fleet_ssh_cli() {
     for f in "${FLEET_SSH_TMP[@]:-}"; do
         [[ -n "$f" ]] && rm -rf "$f"
     done
+    _fleet_ssh_master_stop
     return $rc
 }
 
 _fleet_ssh_cli_body() {
     local target="" port=22 policy="" fw_mode="" fw_file="" config_file="" remote_cfg="/etc/nebula/config.yml"
     local service="nebula.service" assume_yes=0 dry=0 no_restart=0 cert_dir=""
-    local relay_csv="" relay_off=0
+    local relay_csv="" relay_off=0 interact=0
     FLEET_SSH_TMP=()
     local -a extra_hosts=() extra_users=() extra_domains=()
     while (( $# )); do
@@ -925,6 +1049,8 @@ _fleet_ssh_cli_body() {
             --service=*)     service="${1#*=}" ;;
             --cert-dir)      shift; cert_dir="${1:-}" ;;
             --cert-dir=*)    cert_dir="${1#*=}" ;;
+            --interactive|--ask-auth|--ask-password) interact=1 ;;
+            --batch|--no-interactive) interact=0 ;;
             --yes|-y)        assume_yes=1 ;;
             --dry-run|-n)    dry=1 ;;
             --no-restart)    no_restart=1 ;;
@@ -1005,6 +1131,8 @@ _fleet_ssh_cli_body() {
     for h in "${extra_hosts[@]}"; do probe_args+=(--host "$h"); done
     for d in "${extra_domains[@]}"; do probe_args+=(--domain "$d"); done
     for u in "${extra_users[@]}"; do probe_args+=(--user "$u"); done
+    FLEET_AUTH_INTERACTIVE="$interact"
+    FLEET_SUDO_TTY=0
     fleet_probe "$target" "${probe_args[@]}" || return 1
 
     # Resolve the local firewall fragment before touching the remote host.
@@ -1029,7 +1157,7 @@ _fleet_ssh_cli_body() {
     oldcfg="$tmpd/remote.yml"; newcfg="$tmpd/new.yml"
 
     log_info "Fetching $remote_cfg from $FLEET_USER@$FLEET_HOST..."
-    if ! _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "${FLEET_SUDO:+$FLEET_SUDO }cat '$remote_cfg'" > "$oldcfg"; then
+    if ! _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }cat '$remote_cfg'" > "$oldcfg"; then
         log_error "Could not read $remote_cfg on $FLEET_HOST"
         return 1
     fi
@@ -1081,11 +1209,11 @@ _fleet_ssh_cli_body() {
     fi
 
     log_info "Uploading the new config..."
-    if ! _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "${FLEET_SUDO:+$FLEET_SUDO }tee '$remote_tmp' >/dev/null" < "$newcfg"; then
+    if ! _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }tee '$remote_tmp' >/dev/null" < "$newcfg"; then
         log_error "Upload failed."
         return 1
     fi
-    if ! _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "$apply_cmd"; then
+    if ! _fleet_run_priv "$apply_cmd"; then
         log_error "Could not install the config (backup: $remote_cfg.bak.$stamp)."
         return 1
     fi
@@ -1097,7 +1225,7 @@ _fleet_ssh_cli_body() {
         log_warn "Ignoring unexpected nebula path on $FLEET_HOST: $nebula_bin"
         nebula_bin=""
     fi
-    if [[ -n "$nebula_bin" ]] && _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "${FLEET_SUDO:+$FLEET_SUDO }'$nebula_bin' -test -config '$remote_cfg'" >/dev/null 2>&1; then
+    if [[ -n "$nebula_bin" ]] && _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }'$nebula_bin' -test -config '$remote_cfg'" >/dev/null 2>&1; then
         log_success "nebula -test passed on $FLEET_HOST"
     else
         log_warn "Could not validate on $FLEET_HOST (nebula binary not found or test failed)."
@@ -1105,12 +1233,217 @@ _fleet_ssh_cli_body() {
 
     if (( no_restart )); then
         log_info "Service restart skipped (--no-restart)."
-    elif _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" "${FLEET_SUDO:+$FLEET_SUDO }systemctl restart '$service'"; then
+    elif _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }systemctl restart '$service'"; then
         log_success "Restarted $service on $FLEET_HOST"
     else
         log_warn "Could not restart $service on $FLEET_HOST; run it manually."
     fi
     return 0
+}
+
+###################################################################
+########## serial: update one or many nodes over SSH ##############
+###################################################################
+
+fleet_update_usage() {
+    cat <<'EOF'
+Usage: nebula-manager fleet update [--select SPEC]... [--exclude SPEC]...
+                                   <what to change> [options]
+
+Push a config/firewall/relay change to the selected certificates, one host after
+the other. Each host is resolved like `fleet ssh`: the certificate name is the
+default target (node.pod.mesh), `--short` uses just the first label and lets
+your local DNS or /etc/hosts resolve it, and `--host` overrides it (useful when
+you deploy a single node).
+
+What to change (same flags as `fleet ssh`):
+  --policy PACK | --firewall MODE | --firewall-file FILE
+  --relay IP[,IP] | --no-relay
+  --config FILE                 push a complete config.yml
+
+Selection (default: all certificates with a local key):
+  --select SPEC                 group:G, without:G, name:GLOB, ip:CIDR, cert:NAME, all
+  --exclude SPEC                subtract from the selection
+  --cert-dir DIR                Certificate workspace
+
+Hosts and login:
+  --short                       use <first-label> instead of the full cert name
+  --host HOST                   force one host/user@host for every node
+  --user USER                   login candidate (repeatable)
+  --port N                      SSH port (default: 22)
+  --interactive                 allow password logins and a remote sudo password
+                                (one shared SSH session, prompts once per host)
+
+Safety:
+  --yes            do not ask per node (required for a fully unattended run)
+  --dry-run        fetch and diff, change nothing
+  --no-restart     validate but do not restart the service
+  --service NAME   systemd unit (default: nebula.service)
+
+Examples:
+  nebula-manager fleet update --select group:lab01 --relay 10.100.0.1 --interactive
+  nebula-manager fleet update --select cert:ulno-ge75.ulno.mesh --policy lab01 --dry-run
+  nebula-manager fleet update --select name:router* --short --no-relay --yes
+EOF
+}
+
+# _fleet_host_for <cert-name> <style> ; style 0 = full cert name, 1 = first label.
+_fleet_host_for() {
+    local name="$1" style="${2:-0}"
+    if (( style )); then printf '%s' "${name%%.*}"; else printf '%s' "$name"; fi
+}
+
+fleet_update_cli() {
+    local cert_dir="" style=0 host_override="" dry=0 yes=0
+    local -a selects=() excludes=() fwd=()
+    while (( $# )); do
+        case "$1" in
+            --cert-dir)      shift; cert_dir="${1:-}"; if (( $# )); then shift; fi; continue ;;
+            --cert-dir=*)    cert_dir="${1#*=}" ;;
+            --select)        shift; selects+=("${1:-}"); if (( $# )); then shift; fi; continue ;;
+            --select=*)      selects+=("${1#*=}") ;;
+            --exclude)       shift; excludes+=("${1:-}"); if (( $# )); then shift; fi; continue ;;
+            --exclude=*)     excludes+=("${1#*=}") ;;
+            --short)         style=1 ;;
+            --host)          shift; host_override="${1:-}"; if (( $# )); then shift; fi; continue ;;
+            --host=*)        host_override="${1#*=}" ;;
+            --user|--port|--policy|--firewall|--firewall-file|--config|--relay|--service|--remote-config)
+                fwd+=("$1")
+                if (( $# >= 2 )); then fwd+=("$2"); shift; fi
+                shift; continue ;;
+            --user=*|--port=*|--policy=*|--firewall=*|--firewall-file=*|--config=*|--relay=*|--service=*|--remote-config=*)
+                fwd+=("$1") ;;
+            --interactive|--ask-auth|--ask-password) fwd+=(--interactive) ;;
+            --yes|-y)        yes=1; fwd+=(--yes) ;;
+            --dry-run|-n)    dry=1; fwd+=(--dry-run) ;;
+            --no-restart)    fwd+=(--no-restart) ;;
+            --no-relay)      fwd+=(--no-relay) ;;
+            -h|--help)       fleet_update_usage; return 0 ;;
+            -*) log_error "Unknown option for 'fleet update': $1"; fleet_update_usage; return 2 ;;
+            *)  log_error "Unexpected argument for 'fleet update': $1 (use --host for one host)"; return 2 ;;
+        esac
+        shift
+    done
+    (( ${#fwd[@]} )) || {
+        log_error "Nothing to change: pass --policy, --firewall, --firewall-file, --relay, --no-relay or --config."
+        return 2
+    }
+    cert_dir="${cert_dir:-$(resolve_cert_dir)}"
+    local -a selargs=() s
+    for s in "${selects[@]}"; do selargs+=(--select "$s"); done
+    for s in "${excludes[@]}"; do selargs+=(--exclude "$s"); done
+    if ! cert_select "$cert_dir" "${selargs[@]}"; then
+        log_warn "No certificate matched the selection in $cert_dir."
+        return 1
+    fi
+
+    local i name host total="${#SEL_NAMES[@]}" ok=0 bad=0 skip=0
+    local -a labels=() states=()
+    for i in "${!SEL_NAMES[@]}"; do
+        name="${SEL_NAMES[i]}"
+        [[ -n "$name" ]] || continue
+        if [[ ! -f "$cert_dir/$name.key" ]]; then
+            log_info "Skipping $name: no local private key (device certificate)."
+            labels+=("$name"); states+=("skipped"); skip=$((skip + 1))
+            continue
+        fi
+        host="$(_fleet_host_for "$name" "$style")"
+        [[ -n "$host_override" ]] && host="$host_override"
+        printf '\n=== %d/%d  %s  ->  %s ===\n' "$((i + 1))" "$total" "$name" "$host"
+        if fleet_ssh_cli "$host" --cert-dir "$cert_dir" "${fwd[@]}"; then
+            labels+=("$name"); states+=("updated"); ok=$((ok + 1))
+        else
+            labels+=("$name"); states+=("failed"); bad=$((bad + 1))
+        fi
+    done
+
+    printf '\n%s\n' "Fleet update summary:"
+    printf '  %-40s %s\n' "Node" "Result"
+    for i in "${!labels[@]}"; do
+        printf '  %-40s %s\n' "${labels[i]}" "${states[i]}"
+    done
+    printf '\n%d updated, %d failed, %d skipped\n' "$ok" "$bad" "$skip"
+    if (( bad )); then
+        log_info "Re-run a single node with: nebula-manager fleet ssh ${labels[0]} <same options> --interactive"
+    fi
+    (( bad == 0 ))
+}
+
+# TUI: walk through "which node(s), which host, which login, what to change".
+fleet_update_tui() {
+    local cert_dir; cert_dir="$(resolve_cert_dir)"
+    cert_select_tui "$cert_dir" || return 0
+    (( ${#SEL_NAMES[@]} )) || return 0
+
+    local -a args=( --cert-dir "$cert_dir" )
+    if (( ${#SEL_NAMES[@]} == 1 )); then
+        local full="${SEL_NAMES[0]}" host
+        host="$(ui_input "Deploy to one node" \
+            "Host for $full (Enter = the full mesh name; a short name or user@host also works):" "$full")" || return 0
+        [[ -z "$host" ]] && host="$full"
+        args+=( --host "$host" )
+    else
+        local style
+        style="$(ui_menu "Deploy to ${#SEL_NAMES[@]} nodes" "Which host name per node?" \
+            full  "The full certificate name (node.pod.mesh)" \
+            short "Only the first label (node), resolved locally")" || return 0
+        [[ "$style" == "short" ]] && args+=( --short )
+    fi
+
+    local login
+    login="$(ui_menu "Deploy" "Log in as:" \
+        me    "Current user ($(id -un 2>/dev/null || echo "${USER:-user}"))" \
+        root  "root" \
+        user  "user" \
+        other "Another user (type it)")" || return 0
+    case "$login" in
+        root)  args+=( --user root ) ;;
+        user)  args+=( --user user ) ;;
+        other)
+            local u; u="$(ui_input "Deploy" "Login user:")" || return 0
+            [[ -n "$u" ]] || return 0
+            args+=( --user "$u" ) ;;
+    esac
+
+    local auth
+    auth="$(ui_menu "Deploy" "Authentication:" \
+        keys        "Keys only (passwordless sudo needed)" \
+        interactive "Allow password prompts (ssh password + remote sudo)")" || return 0
+    [[ "$auth" == "interactive" ]] && args+=( --interactive )
+
+    local what
+    what="$(ui_menu "Deploy" "What should change on the remote node(s)?" \
+        pack       "Firewall: a policy pack" \
+        mode       "Firewall: a built-in mode (default / permissive)" \
+        relay      "Relay: use the default relay" \
+        relay_pack "Both: relay + firewall pack" \
+        config     "A complete config.yml")" || return 0
+
+    local pack="" addr="" mode="" cfg=""
+    case "$what" in
+        pack|relay_pack) pack="$(policy_name_pick)" || return 0 ;;
+    esac
+    case "$what" in
+        relay|relay_pack)
+            addr="$(relay_default_get 2>/dev/null || true)"
+            addr="$(ui_input "Deploy" "Relay overlay IP for these nodes:" "$addr")" || return 0
+            [[ -n "$addr" ]] || return 0
+            args+=( --relay "$addr" ) ;;
+    esac
+    case "$what" in
+        mode)
+            mode="$(ui_menu "Deploy" "Which built-in firewall?" \
+                default    "Nebula defaults + ICMP (outbound allow, inbound drop)" \
+                permissive "Permissive (bootstrap only)")" || return 0
+            args+=( --firewall "$mode" ) ;;
+        pack|relay_pack) args+=( --policy "$pack" ) ;;
+        config)
+            cfg="$(ui_input "Deploy" "Local config.yml to push:")" || return 0
+            [[ -n "$cfg" ]] || return 0
+            args+=( --config "$cfg" ) ;;
+    esac
+
+    fleet_update_cli "${args[@]}"
 }
 
 fleet_probe_cli() {
@@ -1147,6 +1480,9 @@ Commands:
                       with copyparty) - the way to hand out a whole class.
   croc [options]      Share bundles with croc, one receiver at a time (croc
                       picks and prints the code).
+  update [options]    Push firewall/relay/config changes to the selected nodes
+                      over SSH, one host after the other (--interactive allows
+                      password/sudo prompts).
   ssh TARGET [...]    Push a config/firewall change to one reachable node.
   probe TARGET [...]  Test SSH reachability and discover a login user.
   help                This help
@@ -1157,6 +1493,7 @@ Examples:
   nebula-manager fleet croc --select cert:alice.mesh
   nebula-manager fleet croc --bundle fleet-bundles-*/alice.mesh-nebula-bundle.zip
   nebula-manager fleet probe node4
+  nebula-manager fleet update --select group:lab01 --relay 10.100.0.1 --interactive
   nebula-manager fleet ssh node4 --policy home --yes
   nebula-manager fleet ssh node4 --config ./config.yml --dry-run
 EOF
@@ -1168,6 +1505,7 @@ fleet_cli() {
         bundle|prepare) fleet_bundle_cli "$@" ;;
         serve|http)     fleet_serve_cli "$@" ;;
         croc|share)     fleet_croc_cli "$@" ;;
+        update|deploy|push-all) fleet_update_cli "$@" ;;
         ssh|push)       fleet_ssh_cli "$@" ;;
         probe)          fleet_probe_cli "$@" ;;
         -h|--help|help|"") fleet_usage ;;
@@ -1292,12 +1630,13 @@ fleet_menu() {
         "$(get_icon 'download')Prepare bundles (no transfer)"
         "$(get_icon 'link')Serve bundles over HTTP (class)"
         "$(get_icon 'upload')Share one bundle via croc"
-        "$(get_icon 'connectivity')Push config/firewall over SSH"
+        "$(get_icon 'update')Update node(s) over SSH (firewall, relay, config)"
+        "$(get_icon 'connectivity')Push config/firewall over SSH (one host)"
         "$(get_icon 'scan')Probe SSH reachability"
     )
     # shellcheck disable=SC2034
     dynamic_menu_functions=( "fleet_bundle_tui" "fleet_serve_tui" "fleet_croc_tui" \
-                             "fleet_ssh_tui" "fleet_probe_tui" )
+                             "fleet_update_tui" "fleet_ssh_tui" "fleet_probe_tui" )
     dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 "" \
-        "Hand out client bundles: HTTP for a whole class, croc for one receiver at a time, SSH for a change on one node."
+        "Hand out client bundles: HTTP for a whole class, croc for one receiver at a time, SSH to update nodes."
 }

@@ -188,7 +188,6 @@ nebula-manager fleet probe node4 --domain theprof.net --domain netbird.cloud
 #                 node4.local, node4  (first open port 22 wins)
 # Tailscale MagicDNS needs its tailnet suffix: --host node4.<tailnet>.ts.net
 # login candidates: current user, root, user (or --user/--host)
-# requires key-based SSH; non-root also needs passwordless sudo
 
 nebula-manager fleet ssh node4 --policy home --yes
 nebula-manager fleet ssh node4 --config ./node4-config.yml --dry-run
@@ -202,17 +201,86 @@ What `fleet ssh` does:
    offers one interactive user attempt, then prints `ssh-copy-id` guidance;
 2. fetches the remote config (`--remote-config`, default `/etc/nebula/config.yml`);
 3. merges the change **locally** — a policy pack / firewall mode replaces only
-   the `firewall:` section, or `--config FILE` replaces the whole file;
-   `--firewall-file FILE` also accepts a bare firewall mapping (as written by
-   `policy export`);
+   the `firewall:` section, a `--relay`/`--no-relay` replaces only the `relay:`
+   block, or `--config FILE` replaces the whole file; `--firewall-file FILE`
+   also accepts a bare firewall mapping (as written by `policy export`);
 4. shows a **unified diff** and asks (unless `--yes`);
-5. uploads with a timestamped remote backup (`<config>.bak.YYYYmmdd-HHMMSS`);
+5. uploads to a `/tmp` file on the remote host, backs up the old config
+   (`<config>.bak.YYYYmmdd-HHMMSS`) and moves the new one into place;
 6. validates with `nebula -test` and restarts `--service` (default
    `nebula.service`) unless `--no-restart`.
 
-Root logins need no `sudo`; other users must have passwordless sudo for
-unattended changes. `--dry-run` still fetches (read-only) and prints the exact
-commands without changing anything.
+Root logins need no `sudo`; other users need `sudo`. Unattended runs (keys only)
+require passwordless sudo. If sudo asks for a password, add `--interactive`.
+`--dry-run` still fetches (read-only) and prints the exact commands without
+changing anything.
+
+### Typing passwords (ssh and remote sudo)
+
+```bash
+nebula-manager fleet ssh node4 --policy home --interactive
+```
+
+`--interactive` is the “walk me through the login” mode:
+
+- **ssh** may use a password (`publickey,password,keyboard-interactive`) — you are
+  prompted once and the manager then reuses **one SSH connection**
+  (`ControlMaster`), so later steps do not ask again;
+- the **remote sudo** timestamp is warmed once through that session (`sudo -v`),
+  so the backup, the config write, `nebula -test` and the restart do not prompt
+  again;
+- if sudo still needs a TTY (`requiretty`), the manager switches those commands
+  to `ssh -tt`, so sudo can prompt right there in your terminal;
+- the remote temp file (`/tmp/nebula-manager-config.<pid>.yml`) is always
+  written by you, and only the final copy is elevated.
+
+Without `--interactive` everything is key-only and `sudo -n`, which is what you
+want for scripts and cron.
+
+### Updating several nodes, one after the other
+
+```bash
+# every node of a group, in mesh-name order, one SSH session per host
+nebula-manager fleet update --select group:lab01 --policy lab01 --interactive
+
+# short host names (node instead of node.pod.mesh) when your local DNS knows them
+nebula-manager fleet update --select name:router* --short --no-relay --yes
+
+# one node, but with an explicit host (useful when only the IP is known)
+nebula-manager fleet update --select cert:ulno-ge75.ulno.mesh \
+    --host root@10.20.30.44 --relay 10.100.0.1 --dry-run
+```
+
+`fleet update` resolves the target from the **certificate name** (the full mesh
+hostname by default), runs `fleet ssh` for each match with the same options, and
+prints a summary:
+
+```
+=== 2/5  bob.lab01.mesh  ->  bob.lab01.mesh ===
+…diff…
+[+] Installed config on bob.lab01.mesh (backup: /etc/nebula/config.yml.bak.20261119-101500)
+```
+
+```
+Fleet update summary:
+  Node                                     Result
+  alice.lab01.mesh                         updated
+  bob.lab01.mesh                           updated
+  phone.lab01.mesh                         skipped
+3 updated, 0 failed, 1 skipped
+```
+
+- `--host` forces one host for every selected node; otherwise each certificate
+  name is used (`--short` = first label only). The probe still tries
+  `<name>.<domain>`, `.netbird.cloud`, `.local` and the bare name, so a
+  locally-reachable host works without extra flags.
+- Device certificates (no local key) are skipped.
+- Failures do not stop the run; the summary lists them and the exit code is
+  non-zero.
+- **TUI:** *Fleet ▸ Update node(s) over SSH* walks through: nodes → host name
+  (full/short/custom) → login user (current/root/user/other) → keys or
+  `--interactive` → what to change (policy pack, built-in mode, relay, both, or a
+  whole `config.yml`).
 
 ---
 

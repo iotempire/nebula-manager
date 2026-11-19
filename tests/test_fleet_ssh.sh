@@ -69,17 +69,30 @@ chmod +x "$SANDBOX/bin/nc"
 
 # Mock ssh: key login always succeeds; sudo is passwordless; serve the fake
 # remote config, consume uploads and accept the validation/restart commands.
+# It also emulates a ControlMaster socket (-M -S path -N), so the interactive
+# path can reuse one connection.
 cat > "$SANDBOX/bin/ssh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${SSH_LOG:?}"
-cmd=""
+cmd="" sock="" prev=""
 for a in "$@"; do
     case "$a" in *@*) target="$a" ;; esac
+    [[ "$prev" == "-S" ]] && sock="$a"
+    [[ "$a" == "-N" ]] && master=1
+    prev="$a"
     cmd="$a"
 done
+if [[ "${master:-0}" == 1 ]]; then
+    [[ -n "$sock" ]] && : > "$sock"
+    exit 0
+fi
 case "$cmd" in
     true) exit 0 ;;
-    "sudo -n true") exit 0 ;;
+    "sudo -n true")
+        [[ -f "${HOME}/.sudo-warm" ]] && exit 0
+        [[ "${SUDO_NEEDS_PASSWORD:-0}" == 1 ]] && exit 1
+        exit 0 ;;
+    *"sudo -v"*) : > "${HOME}/.sudo-warm"; exit 0 ;;
     *cat*) cat "${FAKE_REMOTE_CFG:?}"; exit $? ;;
     *"command -v nebula"*) echo /usr/bin/nebula; exit 0 ;;
     *tee*) cat >/dev/null; exit 0 ;;
@@ -144,5 +157,61 @@ assert_contains "explains the candidates" "$out" "Could not reach any candidate"
 assert_contains "suggests an explicit host" "$out" "--host"
 
 assert_eq "no local sudo used" "$(sudo_count)" "0"
+
+# --- interactive auth: password allowed, one shared session, sudo warmed ----
+: > "$SSH_LOG"
+out="$(SUDO_NEEDS_PASSWORD=1 fleet_ssh_cli node4 --policy home --interactive --dry-run 2>&1)"; rc=$?
+assert_eq "interactive dry-run exits 0" "$rc" "0"
+assert_contains "interactive allows password auth" "$(cat "$SSH_LOG")" "password,keyboard-interactive"
+assert_contains "interactive opens one shared session" "$(cat "$SSH_LOG")" "-M -S "
+assert_contains "interactive warms the remote sudo timestamp" "$(cat "$SSH_LOG")" "sudo -v"
+assert_contains "interactive explains what it uses" "$out" "interactive auth"
+fetch_line="$(grep "cat '/etc/nebula/config.yml'" "$SSH_LOG" | tail -n1)"
+assert_contains "the fetch reuses the shared session" "$fetch_line" "-S /tmp/nm-ssh"
+assert_not_contains "the fetch does not force BatchMode" "$fetch_line" "BatchMode=yes"
+
+# Without --interactive, a sudo password is an actionable error.
+rm -f "$HOME/.sudo-warm"
+out="$(SUDO_NEEDS_PASSWORD=1 fleet_ssh_cli node4 --policy home --dry-run 2>&1)"; rc=$?
+assert_ne "passwordless sudo is required without --interactive" "$rc" "0"
+assert_contains "the error suggests --interactive" "$out" "--interactive"
+
+# --- fleet update: serial over a selection, short host names ----------------
+CERT_DIR="$keys" SIGN_NAME="bob.theprof.mesh" SIGN_IP="10.92.0.3/24" SIGN_GROUPS="home" pki_sign >/dev/null 2>&1
+CERT_DIR="$keys" SIGN_NAME="phone.theprof.mesh" SIGN_IP="10.92.0.4/24" SIGN_GROUPS="home" pki_sign >/dev/null 2>&1
+rm -f "$keys/phone.theprof.mesh.key"      # device certificate: no local key
+cat > "$SANDBOX/bin/nc" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${NC_LOG:?}"
+for a in "$@"; do
+    case "$a" in
+        node4.theprof.mesh|node5.theprof.net|alice|bob|alice.theprof.mesh|bob.theprof.mesh) exit 0 ;;
+    esac
+done
+exit 1
+MOCK
+chmod +x "$SANDBOX/bin/nc"
+
+: > "$SSH_LOG"
+out="$(fleet_update_cli --select cert:alice.theprof.mesh --host node5.theprof.net \
+    --policy home --yes --dry-run 2>&1)"; rc=$?
+assert_eq "single-host update exits 0" "$rc" "0"
+assert_contains "single-host update names the node" "$out" "alice.theprof.mesh  ->  node5.theprof.net"
+assert_contains "single-host update prints a summary" "$out" "Fleet update summary"
+assert_contains "single-host update reports the result" "$out" "updated"
+
+assert_eq "fleet update without a change is refused" \
+    "$(fleet_update_cli --select all >/dev/null 2>&1; echo $?)" "2"
+
+out="$(fleet_update_cli --select group:home --short --policy home --dry-run --yes 2>&1)"; rc=$?
+assert_eq "serial update exits 0" "$rc" "0"
+assert_contains "serial update counts the nodes" "$out" "2 updated"
+assert_contains "serial update lists the second node" "$out" "bob.theprof.mesh  ->  bob"
+assert_contains "serial update skips device certificates" "$out" "device certificate"
+assert_contains "serial update reports the skip count" "$out" "2 updated, 0 failed, 1 skipped"
+
+# --- helpers ----------------------------------------------------------------
+assert_eq "full host helper" "$(_fleet_host_for a.b.mesh 0)" "a.b.mesh"
+assert_eq "short host helper" "$(_fleet_host_for a.b.mesh 1)" "a"
 
 harness_summary

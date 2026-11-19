@@ -53,6 +53,13 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       validates and restarts. `fleet bundle` renders the archives, `fleet serve`
       publishes them over HTTP (read-only, copyparty password, python fallback)
       and `fleet croc` shares them one receiver at a time with croc's own code.
+- [x] **Serial SSH updates** – `fleet update --select …` pushes the same
+      firewall/relay/config change to every selected node, one host after the
+      other, with a result table. `--short` uses the first label of the
+      certificate name, `--host` forces one host, and `--interactive` walks
+      through password auth and a remote sudo password (one shared SSH session,
+      sudo timestamp warmed once, `ssh -tt` when sudo needs a TTY). TUI:
+      *Fleet ▸ Update node(s) over SSH*.
 - [x] **Single-file release build** – `make build` (`make release` alias)
       generates `dist/nebula-manager` with modules and runtime assets embedded,
       plus a checksum. The modular `lib/` tree stays canonical; the artifact is
