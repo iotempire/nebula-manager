@@ -167,6 +167,19 @@ out="$(fleet_ssh_cli alice.theprof.mesh --host node4.theprof.mesh --from-store \
 assert_ne "--from-store without a stored config fails" "$rc" "0"
 assert_contains "the missing store config is explained" "$out" "cert config generate"
 
+# --- the update wizard forwards its answers to the CLI ----------------------
+# Regression: the wizard used to ignore the checklist (and the stored-config
+# choice), so "update this one node" turned into "update all 57 certificates".
+printf 'tun:\n  dev: nebula9\n' > "$keys/alice.theprof.mesh.yml"
+tui_out="$(
+    fleet_update_cli() { printf 'ARGS'; printf ' [%s]' "$@"; printf '\n'; }
+    CERT_DIR_OVERRIDE="$keys" fleet_update_tui <<< $'name:alice\n\nnode5.theprof.net\n1\n3\n5\n'
+)"
+assert_contains "the wizard forwards the selected certificate" "$tui_out" "[--select] [cert:alice.theprof.mesh]"
+assert_contains "the wizard forwards the host" "$tui_out" "[--host] [node5.theprof.net]"
+assert_contains "the wizard forwards the stored-config choice" "$tui_out" "[--from-store]"
+rm -f "$keys/alice.theprof.mesh.yml"
+
 # --- root login: no sudo anywhere ------------------------------------------
 : > "$SSH_LOG"
 out="$(fleet_ssh_cli node4 --user root --config "$SANDBOX/push.yml" --dry-run --cert-dir "$keys" 2>&1)"; rc=$?

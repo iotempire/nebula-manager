@@ -750,6 +750,12 @@ _ui_menu_geometry() {
 # ui_menu <title> <prompt> <tag> <desc> [<tag> <desc> ...] ; prints chosen tag
 ui_menu() {
     local title="$1" prompt="$2"; shift 2
+    # Pairs only: an odd trailing argument (a typo in the caller) used to become
+    # an invisible extra choice and shift the selection. Drop it loudly.
+    if (( $# % 2 != 0 )); then
+        log_warn "ui_menu: odd number of arguments - ignoring the last one"
+        set -- "${@:1:$(( $# - 1 ))}"
+    fi
     local backend choice
     backend="$(ui_backend)"
     case "$backend" in

@@ -1510,6 +1510,10 @@ fleet_update_tui() {
     (( ${#SEL_NAMES[@]} )) || return 0
 
     local -a args=( --cert-dir "$cert_dir" )
+    # Forward the checklist result - without this the update would run over
+    # every certificate in the workspace.
+    local sel
+    for sel in "${SEL_NAMES[@]}"; do args+=( --select "cert:$sel" ); done
     if (( ${#SEL_NAMES[@]} == 1 )); then
         local full="${SEL_NAMES[0]}" host
         host="$(ui_input "Deploy to one node" \
@@ -1556,7 +1560,7 @@ fleet_update_tui() {
         relay      "Relay: use the default relay" \
         relay_pack "Both: relay + firewall pack" \
         store      "Everything from the stored config of each node (<name>.yml)" \
-        config     "A complete config.yml file that I name") " || return 0
+        config     "A complete config.yml file that I name")" || return 0
 
     local pack="" addr="" mode="" cfg=""
     case "$what" in

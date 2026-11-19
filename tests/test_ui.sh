@@ -17,6 +17,11 @@ assert_eq "plain menu returns the chosen tag" "$out" "b"
 out="$(printf '1\n' | ui_menu "Title" "Pick one" create "Create" browse "Browse" cancel "Cancel")"
 assert_eq "plain menu returns first tag" "$out" "create"
 
+# An odd trailing argument used to become an invisible extra choice (and made
+# the selected tag carry a space, so the caller's `case` never matched).
+out="$(printf '2\n' | ui_menu "Title" "Pick one" a "First" b "Second" " " 2>/dev/null)"
+assert_eq "an odd argument does not shift the choice" "$out" "b"
+
 # --- a menu can optionally accept typed text -------------------------------
 out="$(printf '2\n' | ui_menu_or_text "Title" "Pick one" a "First" b "Second")"
 assert_eq "menu_or_text returns the chosen tag" "$out" "b"
