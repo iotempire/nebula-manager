@@ -718,13 +718,20 @@ fleet_ssh_opts() {
 
 # --- ssh auth modes ---------------------------------------------------------
 # FLEET_AUTH_INTERACTIVE=1
-#   Allow password / keyboard-interactive logins and keep ONE ssh connection
-#   (ControlMaster) open, so the password is typed once and the remote sudo
-#   timestamp can be warmed once. Without it everything is key-only.
+#   Allow password / keyboard-interactive logins. Everything is key-only
+#   without it.
 # FLEET_SUDO_TTY=1
-#   Privileged remote commands need a TTY (sudo with a password or `requiretty`).
+#   Privileged remote commands need a TTY (`requiretty`).
+# FLEET_SUDO_PASSWORD=1
+#   sudo needs a password. sudo caches that per TTY, so each privileged step
+#   runs in its own `ssh -tt` session (see fleet_ssh_cli).
+# FLEET_SSH_MASTER
+#   Path of a reusable connection, opened only when the *ssh* login itself needs
+#   a password (a key login has nothing to cache, and a master that dies takes
+#   every later step with it).
 FLEET_AUTH_INTERACTIVE=${FLEET_AUTH_INTERACTIVE:-0}
 FLEET_SUDO_TTY=${FLEET_SUDO_TTY:-0}
+FLEET_SUDO_PASSWORD=${FLEET_SUDO_PASSWORD:-0}
 FLEET_SSH_MASTER=${FLEET_SSH_MASTER:-}
 
 # _fleet_want_interactive ; is a password prompt useful right now?
@@ -744,13 +751,15 @@ _fleet_want_interactive() {
 }
 
 # _fleet_ssh_master_start <user> <host> <port>
-# Open a reusable connection (asks for the ssh password at most once).
+# Open a reusable connection for an ssh *password* login (one prompt, not one
+# per step). Returns 1 when no usable master could be opened; callers then just
+# run without it.
 _fleet_ssh_master_start() {
     local user="$1" host="$2" port="$3" sock i
     (( FLEET_AUTH_INTERACTIVE )) || return 0
     [[ -n "$FLEET_SSH_MASTER" ]] && return 0
     sock="${TMPDIR:-/tmp}/nm-ssh-$$-${RANDOM}"
-    log_info "Opening one SSH session to $user@$host (password prompts happen here, once)..."
+    log_info "Opening one shared SSH session to $user@$host (the ssh password is asked once)..."
     # -N: no remote command, just the multiplexed connection.
     ssh -M -S "$sock" -N -o ControlPersist=600 -o ConnectTimeout=10 \
         -o StrictHostKeyChecking=accept-new \
@@ -762,9 +771,17 @@ _fleet_ssh_master_start() {
     done
     if [[ ! -e "$sock" ]]; then
         log_warn "Could not open the shared SSH session; each step will ask for the password separately."
+        rm -f "$sock" 2>/dev/null || true
         return 1
     fi
     FLEET_SSH_MASTER="$sock"
+    # An existing socket is not proof of a working session: a master that died
+    # makes every later call fail with "Shared connection ... closed". Prove it.
+    if ! ssh -S "$FLEET_SSH_MASTER" -o ConnectTimeout=5 -p "$port" "$user@$host" true >/dev/null 2>&1; then
+        log_warn "The shared SSH session is not usable; each step will ask for the password separately."
+        _fleet_ssh_master_stop
+        return 1
+    fi
     return 0
 }
 
@@ -788,15 +805,15 @@ _fleet_ssh() {
 }
 
 # _fleet_ssh_tty ... ; same, but allocate a remote TTY (sudo can prompt).
+# Never touch stdin here: callers use it to feed uploads (`tee`), and the remote
+# sudo prompt is answered through the remote tty that ssh wires to our stdin.
 _fleet_ssh_tty() {
     local user="$1" host="$2" port="$3"; shift 3
-    local -a o=()
+    local -a o=() cmd=(ssh -tt)
     mapfile -t o < <(fleet_ssh_opts)
-    if [[ -n "$FLEET_SSH_MASTER" ]]; then
-        ssh -tt -S "$FLEET_SSH_MASTER" "${o[@]}" -p "$port" "$user@$host" "$@"
-    else
-        ssh -tt "${o[@]}" -p "$port" "$user@$host" "$@"
-    fi
+    [[ -n "$FLEET_SSH_MASTER" ]] && cmd+=(-S "$FLEET_SSH_MASTER")
+    cmd+=("${o[@]}" -p "$port" "$user@$host" "$@")
+    "${cmd[@]}"
 }
 
 # _fleet_run_priv <remote command...> ; run with the probed sudo prefix.
@@ -889,7 +906,7 @@ fleet_probe() {
         [[ " ${uuniq[*]:-} " == *" $u "* ]] || uuniq+=("$u")
     done
 
-    local found_user="" found_host=""
+    local found_user="" found_host="" found_key=0
     # Discovery is key-only on purpose: with password auth enabled ssh would
     # prompt for every candidate user.
     local _saved_interactive="$FLEET_AUTH_INTERACTIVE"
@@ -898,7 +915,7 @@ fleet_probe() {
         for u in "${uuniq[@]}"; do
             log_info "Trying $u@$h (key auth)..."
             if _fleet_ssh_ok "$u" "$h" "$port"; then
-                found_user="$u"; found_host="$h"; break 2
+                found_user="$u"; found_host="$h"; found_key=1; break 2
             fi
         done
     done
@@ -942,42 +959,60 @@ fleet_probe() {
     FLEET_USER="$found_user"
     FLEET_PORT="$port"
 
+    # Reuse one connection only when the *ssh* login itself needed a password.
+    # With key auth a master saves nothing (sudo's timestamp is per TTY) and a
+    # master that dies would fail every later step.
+    if (( FLEET_AUTH_INTERACTIVE )) && (( ! found_key )); then
+        _fleet_ssh_master_start "$found_user" "$found_host" "$port" || true
+    fi
+
     local sudo_prefix=""
     if [[ "$found_user" != "root" ]]; then
         if _fleet_ssh "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
             sudo_prefix="sudo -n"
         elif (( FLEET_AUTH_INTERACTIVE )); then
-            # Warm the remote sudo timestamp once (a shared SSH session keeps
-            # the ssh password prompt single), then keep using sudo -n.
-            _fleet_ssh_master_start "$found_user" "$found_host" "$port" || true
-            log_info "$found_user@$found_host: sudo may ask for a password now (once)."
-            if _fleet_ssh_tty "$found_user" "$found_host" "$port" "sudo -v" \
-                && _fleet_ssh "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
-                sudo_prefix="sudo -n"
-            elif _fleet_ssh_tty "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
-                # sudo works with a TTY but does not cache (`requiretty`).
+            # sudo's timestamp is per-TTY by default (timestamp_type=tty), so
+            # `sudo -v` in one session never authorizes the next one - never
+            # warm it. Classify without prompting first: passwordless sudo that
+            # only wants a TTY (`requiretty`) needs no password either.
+            if _fleet_ssh_tty "$found_user" "$found_host" "$port" "sudo -n true" >/dev/null 2>&1; then
+                # Passwordless sudo that only works with a TTY (sudoers
+                # `requiretty`): no password needed, just allocate one.
                 FLEET_SUDO_TTY=1
-                sudo_prefix="sudo"
-            else
-                log_error "$found_user@$found_host did not grant sudo."
-                log_info "Log in as root, grant passwordless sudo, or add the user to sudoers."
+                sudo_prefix="sudo -n"
+            elif [[ ! -t 0 && ! -r /dev/tty ]]; then
+                # A remote sudo prompt is answered through our stdin/pty: with
+                # no terminal at all the session would die instantly (or wait
+                # for a password nobody can type). Say so instead.
+                log_error "$found_user@$found_host needs a sudo password, but there is no terminal."
+                log_info "Run the manager in a terminal, or use passwordless sudo / root login."
                 _fleet_ssh_master_stop
                 return 1
+            else
+                log_info "$found_user@$found_host: sudo will ask for your password (remote side)."
+                FLEET_SUDO_PASSWORD=1
+                sudo_prefix="sudo"
             fi
         else
             log_error "$found_user@$found_host requires a password for sudo."
             log_info "Unattended changes need passwordless sudo (sudoers) or root login."
-            log_info "Re-run with --interactive to type the sudo password on the remote host."
+            log_info "When run in a terminal (or with --interactive), the manager asks for the sudo password."
             return 1
         fi
     fi
 
     FLEET_SUDO="$sudo_prefix"
     local _mode="key auth"
-    (( FLEET_AUTH_INTERACTIVE )) && _mode="interactive auth"
+    if (( ! found_key )); then
+        _mode="password login"
+    elif (( FLEET_AUTH_INTERACTIVE )); then
+        _mode="key auth, prompts allowed"
+    fi
     local _sudo="no sudo needed"
     if [[ -n "$sudo_prefix" ]]; then
-        if (( FLEET_SUDO_TTY )); then _sudo="sudo (TTY)"; else _sudo="passwordless sudo"; fi
+        if (( FLEET_SUDO_PASSWORD )); then _sudo="sudo password (per session)"
+        elif (( FLEET_SUDO_TTY )); then _sudo="sudo (TTY)"
+        else _sudo="passwordless sudo"; fi
     fi
     log_success "Using $FLEET_USER@$FLEET_HOST:$FLEET_PORT ($_mode, $_sudo)"
     return 0
@@ -1152,6 +1187,7 @@ _fleet_ssh_cli_body() {
     for d in "${extra_domains[@]}"; do probe_args+=(--domain "$d"); done
     for u in "${extra_users[@]}"; do probe_args+=(--user "$u"); done
     FLEET_INTERACTIVE_MODE="$interact"
+    FLEET_SUDO_PASSWORD=0
     if _fleet_want_interactive; then
         FLEET_AUTH_INTERACTIVE=1
     else
@@ -1182,7 +1218,28 @@ _fleet_ssh_cli_body() {
     oldcfg="$tmpd/remote.yml"; newcfg="$tmpd/new.yml"
 
     log_info "Fetching $remote_cfg from $FLEET_USER@$FLEET_HOST..."
-    if ! _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }cat '$remote_cfg'" > "$oldcfg"; then
+    if (( FLEET_SUDO_PASSWORD )); then
+        # With a TTY session sudo's prompt is part of the session *stdout*, so
+        # `sudo cat > file` would write the prompt into the file and wait for a
+        # password nobody can see. Stage a user-readable copy in one TTY session
+        # (prompt visible), then read that copy with plain ssh.
+        local staged
+        staged="$(_fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" \
+            'mktemp "${TMPDIR:-/tmp}/nm-read.XXXXXX"' 2>/dev/null | tail -n1)"
+        [[ "$staged" == /* ]] || staged="/tmp/nm-read.$$"
+        if ! _fleet_ssh_tty "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" \
+                "${FLEET_SUDO:+$FLEET_SUDO }cp -p '$remote_cfg' '$staged' && ${FLEET_SUDO:+$FLEET_SUDO }chown \$(id -u):\$(id -g) '$staged'"; then
+            log_error "Could not read $remote_cfg on $FLEET_HOST"
+            log_info "If sudo asked for a password, it was refused; otherwise the file may not exist."
+            log_info "Log in as root, or grant passwordless sudo, if this host needs no password."
+            return 1
+        fi
+        if ! _fleet_ssh "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" \
+                "cat '$staged'; rm -f '$staged'" > "$oldcfg"; then
+            log_error "Could not read the staged copy $staged on $FLEET_HOST"
+            return 1
+        fi
+    elif ! _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }cat '$remote_cfg'" > "$oldcfg"; then
         log_error "Could not read $remote_cfg on $FLEET_HOST"
         return 1
     fi
@@ -1231,6 +1288,15 @@ _fleet_ssh_cli_body() {
         log_info "Then run: $apply_cmd"
         [[ "$no_restart" == 1 ]] || log_info "Then restart: ${FLEET_SUDO:+$FLEET_SUDO }systemctl restart $service"
         return 0
+    fi
+
+    # With a sudo *password*, everything privileged happens inside ONE TTY
+    # session (combined backup + install + test + restart) and the config is
+    # shipped base64-encoded: sudo's timestamp is per-TTY, so separate ssh
+    # calls would ask for the password again every time.
+    if (( FLEET_SUDO_PASSWORD )); then
+        _fleet_apply_tty_session "$newcfg" "$remote_cfg" "$service" "$no_restart" "$stamp" "$remote_tmp"
+        return $?
     fi
 
     log_info "Uploading the new config..."
@@ -1475,6 +1541,72 @@ fleet_update_tui() {
     esac
 
     fleet_update_cli "${args[@]}"
+}
+
+# _fleet_apply_tty_session <newcfg> <remote_cfg> <service> <no_restart> <stamp> <remote_tmp>
+# Install the config with ONE privileged TTY session: the config travels as
+# base64 inside the script, so `sudo` (and its per-TTY timestamp) is only
+# involved for this single connection. Reports like the passwordless path.
+_fleet_apply_tty_session() {
+    local newcfg="$1" remote_cfg="$2" service="$3" no_restart="$4"
+    local stamp="$5" remote_tmp="$6" b64 script
+    b64="$(base64 -w0 < "$newcfg" 2>/dev/null)"
+    [[ -n "$b64" ]] || b64="$(base64 < "$newcfg" | tr -d '\n')"
+    [[ -n "$b64" ]] || { log_error "Could not encode $newcfg"; return 1; }
+
+    script=$(cat <<EOF
+set -e
+trap 'echo "[apply] command failed (line \$LINENO)" >&2' ERR
+tmp='$remote_tmp'
+printf '%s' '$b64' | { base64 -d 2>/dev/null || base64 -D; } > "\$tmp"
+sudo test -e '$remote_cfg.bak.$stamp' || sudo cp -p '$remote_cfg' '$remote_cfg.bak.$stamp'
+sudo cp "\$tmp" '$remote_cfg'
+sudo chmod 644 '$remote_cfg'
+rm -f "\$tmp"
+echo '[apply] config installed (backup: $remote_cfg.bak.$stamp)'
+nebula_bin=\$(command -v nebula 2>/dev/null || echo /usr/local/bin/nebula)
+if ! sudo "\$nebula_bin" -test -config '$remote_cfg'; then
+    echo '[apply] nebula -test FAILED - the new config is in place, nothing was restarted.' >&2
+    echo "[apply] roll back with: sudo cp -p '$remote_cfg.bak.$stamp' '$remote_cfg'" >&2
+    exit 1
+fi
+echo '[apply] nebula -test passed'
+EOF
+)
+    if [[ "$no_restart" != 1 ]]; then
+        script+=$'\n'"if ! sudo systemctl restart '$service'; then"
+        script+=$'\n'"    echo '[apply] service restart FAILED - check: systemctl status $service' >&2"
+        script+=$'\n'"    exit 1"
+        script+=$'\n'"fi"
+        script+=$'\n'"echo '[apply] restarted $service'"
+    fi
+    script+=$'\n'"echo 'nebula-manager: done'"
+
+    log_info "Applying in one privileged session (sudo asks once)..."
+    # The script travels as a base64 *argument*, never through our stdin: with
+    # `ssh -tt` the remote sudo prompt reads the remote tty, whose input is
+    # whatever we feed ssh's stdin. A piped script would make that pipe the
+    # answer to "[sudo] password" (so the prompt could never be answered).
+    local body_b64
+    body_b64="$(printf '%s\n' "$script" | base64 -w0 2>/dev/null)"
+    [[ -n "$body_b64" ]] || body_b64="$(printf '%s\n' "$script" | base64 | tr -d '\n')"
+    [[ -n "$body_b64" ]] || { log_error "Could not encode the apply script"; return 1; }
+    if ! _fleet_ssh_tty "$FLEET_USER" "$FLEET_HOST" "$FLEET_PORT" \
+            "printf %s '$body_b64' | { base64 -d 2>/dev/null || base64 -D; } | bash"; then
+        log_error "Could not install the config on $FLEET_HOST (backup: $remote_cfg.bak.$stamp)."
+        log_info "Read the [apply] lines above for the step that failed."
+        log_info "Roll back on $FLEET_HOST with:"
+        log_info "  sudo cp -p $remote_cfg.bak.$stamp $remote_cfg && sudo systemctl restart $service"
+        return 1
+    fi
+    log_success "Installed config on $FLEET_HOST (backup: $remote_cfg.bak.$stamp)"
+    log_success "nebula -test passed on $FLEET_HOST"
+    if [[ "$no_restart" == 1 ]]; then
+        log_info "Service restart skipped (--no-restart)."
+    else
+        log_success "Restarted $service on $FLEET_HOST"
+    fi
+    return 0
 }
 
 fleet_probe_cli() {

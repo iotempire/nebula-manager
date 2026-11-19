@@ -87,12 +87,23 @@ if [[ "${master:-0}" == 1 ]]; then
     exit 0
 fi
 case "$cmd" in
-    true) exit 0 ;;
+    true)
+        # SSH_KEY_FAILS: no key, only a password login works
+        [[ "${SSH_KEY_FAILS:-0}" == 1 && "$*" == *BatchMode=yes* ]] && exit 255
+        exit 0 ;;
     "sudo -n true")
+        # SUDO_NO_CACHE: per-TTY timestamps only (sudo -v never helps later calls)
+        [[ "${SUDO_NO_CACHE:-0}" == 1 ]] && exit 1
+        # SUDO_REQUIRE_TTY: passwordless sudo that needs a remote pty
+        if [[ "${SUDO_REQUIRE_TTY:-0}" == 1 ]]; then
+            [[ "$*" == *"-tt"* ]] && exit 0
+            exit 1
+        fi
         [[ -f "${HOME}/.sudo-warm" ]] && exit 0
         [[ "${SUDO_NEEDS_PASSWORD:-0}" == 1 ]] && exit 1
         exit 0 ;;
     *"sudo -v"*) : > "${HOME}/.sudo-warm"; exit 0 ;;
+    *"| bash"*) exit 0 ;;
     *cat*) cat "${FAKE_REMOTE_CFG:?}"; exit $? ;;
     *"command -v nebula"*) echo /usr/bin/nebula; exit 0 ;;
     *tee*) cat >/dev/null; exit 0 ;;
@@ -158,17 +169,31 @@ assert_contains "suggests an explicit host" "$out" "--host"
 
 assert_eq "no local sudo used" "$(sudo_count)" "0"
 
-# --- interactive auth: password allowed, one shared session, sudo warmed ----
+# --- interactive auth: password allowed, no shared session with key auth ----
 : > "$SSH_LOG"
 out="$(SUDO_NEEDS_PASSWORD=1 fleet_ssh_cli node4 --policy home --interactive --dry-run 2>&1)"; rc=$?
 assert_eq "interactive dry-run exits 0" "$rc" "0"
 assert_contains "interactive allows password auth" "$(cat "$SSH_LOG")" "password,keyboard-interactive"
-assert_contains "interactive opens one shared session" "$(cat "$SSH_LOG")" "-M -S "
-assert_contains "interactive warms the remote sudo timestamp" "$(cat "$SSH_LOG")" "sudo -v"
-assert_contains "interactive explains what it uses" "$out" "interactive auth"
+assert_contains "interactive explains what it uses" "$out" "key auth, prompts allowed"
+assert_not_contains "no shared session for a key login" "$(cat "$SSH_LOG")" "-M -S "
+assert_not_contains "no sudo warm-up (per-TTY timestamps)" "$(cat "$SSH_LOG")" "sudo -v"
+assert_contains "interactive announces the sudo password" "$out" "sudo will ask for your password"
+stage_line="$(grep "cp -p '/etc/nebula/config.yml'" "$SSH_LOG" | tail -n1)"
+assert_contains "the privileged read of the config runs in a TTY session" "$stage_line" "-tt"
+read_line="$(grep "cat '/tmp/nm-read" "$SSH_LOG" | tail -n1)"
+assert_contains "the content is read back from a staged copy" "$read_line" "nm-read"
+assert_not_contains "the read-back is no TTY session (its prompt would be hidden)" "$read_line" "-tt"
+assert_contains "the staged copy is removed" "$read_line" "rm -f"
+
+# --- ssh password login: one shared session, verified and reused -------------
+: > "$SSH_LOG"
+out="$(SSH_KEY_FAILS=1 fleet_ssh_cli node4 --policy home --yes --interactive --dry-run 2>&1)"; rc=$?
+assert_eq "password-login dry-run exits 0" "$rc" "0"
+assert_contains "a password login opens one shared session" "$(cat "$SSH_LOG")" "-M -S "
+assert_contains "the shared session is announced" "$out" "Opening one shared SSH session"
+assert_contains "the login mode is reported" "$out" "password login"
 fetch_line="$(grep "cat '/etc/nebula/config.yml'" "$SSH_LOG" | tail -n1)"
 assert_contains "the fetch reuses the shared session" "$fetch_line" "-S /tmp/nm-ssh"
-assert_not_contains "the fetch does not force BatchMode" "$fetch_line" "BatchMode=yes"
 
 # Without --interactive, a sudo password is an actionable error.
 rm -f "$HOME/.sudo-warm"
@@ -228,6 +253,28 @@ out="$(SUDO_NEEDS_PASSWORD=1 fleet_update_cli --select cert:alice.theprof.mesh \
     --host node5.theprof.net --policy home --yes --no-interactive --dry-run 2>&1)"; rc=$?
 assert_eq "fleet update forwards --no-interactive" "$rc" "1"
 assert_contains "fleet update reports the failed host" "$out" "1 failed"
+
+# --- sudo password (per-TTY timestamps): one privileged session -------------
+: > "$SSH_LOG"
+out="$(SUDO_NO_CACHE=1 fleet_ssh_cli node4 --policy home --yes --interactive 2>&1)"; rc=$?
+assert_eq "sudo-password apply exits 0" "$rc" "0"
+assert_contains "the password mode is announced" "$out" "sudo password (per session)"
+assert_contains "the apply runs as one script session" "$(cat "$SSH_LOG")" "| bash"
+assert_contains "the apply payload is not piped through our stdin" "$(grep '| bash' "$SSH_LOG" | tail -n1)" "printf %s"
+assert_contains "the install is reported" "$out" "Installed config on"
+assert_contains "the validation is reported" "$out" "nebula -test passed"
+assert_contains "the restart is reported" "$out" "Restarted nebula.service"
+assert_eq "no separate upload step" "$(grep -c "tee '/tmp" "$SSH_LOG")" "0"
+assert_contains "sudo is prompted for at most twice" "$out" "sudo will ask for your password"
+assert_not_contains "no sudo warm-up in password mode" "$(cat "$SSH_LOG")" "sudo -v"
+
+# passwordless sudo that only works with a TTY (sudoers requiretty)
+: > "$SSH_LOG"
+out="$(SUDO_REQUIRE_TTY=1 fleet_ssh_cli node4 --policy home --yes --interactive 2>&1)"; rc=$?
+assert_eq "requiretty apply exits 0" "$rc" "0"
+assert_contains "requiretty uses a TTY for sudo" "$(cat "$SSH_LOG")" "-tt"
+assert_eq "requiretty does not enter password mode" \
+    "$(printf '%s' "$out" | grep -c 'sudo password')" "0"
 
 # --- helpers ----------------------------------------------------------------
 assert_eq "full host helper" "$(_fleet_host_for a.b.mesh 0)" "a.b.mesh"

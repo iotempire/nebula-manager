@@ -58,7 +58,9 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       other, with a result table. `--short` uses the first label of the
       certificate name, `--host` forces one host. Authentication is automatic:
       at a terminal (and `NEBULA_NO_PROMPT` unset) keys are tried first, then one
-      password login, then a warmed `sudo -v`; scripts/cron stay key-only.
+      password login, then a sudo password — asked at most twice, because the
+      read and the apply each run in one TTY session (sudo's timestamp is
+      per-TTY, so `sudo -v` cannot be shared); scripts/cron stay key-only.
       `--interactive` / `--no-interactive` force either behaviour. TUI:
       *Fleet ▸ Update node(s) over SSH*.
 - [x] **Single-file release build** – `make build` (`make release` alias)

@@ -234,15 +234,44 @@ When prompts are allowed:
 - **ssh** may use a password (`publickey,password,keyboard-interactive`). If the
   key login does not work, the manager tries one password login for the most
   likely account, then offers to try a different user;
-- after that it reuses **one SSH connection** (`ControlMaster`), so later steps
-  do not ask again;
-- the **remote sudo** timestamp is warmed once through that session (`sudo -v`),
-  so the backup, the config write, `nebula -test` and the restart do not prompt
-  again;
-- if sudo still needs a TTY (`requiretty`), those commands switch to `ssh -tt`,
-  so sudo can prompt right there in your terminal;
-- the remote temp file (`/tmp/nebula-manager-config.<pid>.yml`) is always
-  written by you, and only the final copy is elevated.
+- a **shared connection** (`ControlMaster`) is opened **only when that login
+  itself needed a password**, so the ssh password is asked once. With key auth
+  none is opened: it would save nothing (sudo's timestamp is per TTY) and a
+  master that dies fails every later step with “Shared connection … closed”;
+- **sudo** is classified once and the summary line names the case:
+  `passwordless sudo`, `sudo (TTY)` (a sudoers `requiretty`, no password), or
+  `sudo password (per session)`; the login mode is shown next to it
+  (`key auth`, `key auth, prompts allowed`, `password login`);
+
+**Why sudo can ask twice.** sudo caches its timestamp **per TTY**
+(`timestamp_type=tty`, the default) and every `ssh -tt` allocates a fresh pty,
+so `sudo -v` in one session cannot authorize the next one — the manager never
+“warms” it. The probe classifies sudo **without prompting**, and the work is
+grouped into as few TTY sessions as possible:
+
+1. one TTY session **stages a user-readable copy** of the remote config
+   (`sudo cp -p … && sudo chown "$(id -u)"`), which is where the password is
+   first asked — so a typo fails before anything is written. The copy is then
+   read with a plain `cat` and removed. Reading with `sudo cat > file` would
+   *not* work: with a TTY the prompt is part of the session's stdout, so it
+   would be written into the file and sudo would wait for input you cannot see;
+2. one further privileged TTY session does the **backup, write, `nebula -test`
+   and start/restart together** (the config travels base64-encoded inside that
+   session).
+
+So sudo asks at most **twice** for a whole `fleet ssh`, never once per command.
+If your sudoers uses `timestamp_type=global`, the second session reuses the
+timestamp and you type the password only once.
+
+The apply script itself travels as a base64 **argument**, never through the
+manager's stdin: with `ssh -tt` the remote sudo prompt reads the remote tty,
+and that tty is fed by whatever we hand ssh's stdin — a piped script would
+silently become the answer to “`[sudo] password`”. If there is no terminal at
+all (no stdin tty and no `/dev/tty`), the manager refuses up front instead of
+waiting for a password nobody can type.
+
+The remote temp file (`/tmp/nebula-manager-config.<pid>.yml`) is always written
+by you, and only the final copy is elevated.
 
 ```bash
 # force prompts (e.g. inside a pipeline where stdin is not a terminal)
