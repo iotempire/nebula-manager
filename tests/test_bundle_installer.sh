@@ -57,6 +57,11 @@ assert_contains "PowerShell installer elevates"   "$(cat "$ps1")" "RunAs"
 assert_contains "PowerShell installer diffs"      "$(cat "$ps1")" "diff --no-index"
 assert_contains "PowerShell installer can skip"   "$(cat "$ps1")" "NoStart"
 
+# The DNS hook the shell installer writes must survive a service restart
+# (a restart recreates the tun device and drops its per-link DNS settings).
+assert_contains "shell installer couples the DNS hook to the service" \
+    "$(cat "$unpack/install.sh")" "PartOf=%s"
+
 # --- install into a user-owned directory (no sudo, no service) --------------
 target="$SANDBOX/client"
 : > "$SUDO_LOG"

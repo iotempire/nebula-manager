@@ -399,3 +399,27 @@ group); the summary prints them separated by commas so the OR is visible.
 
 **Open.** The menu reorganisation (identity / policies / distribution / this
 host) is documented in `docs/policy-cookbook.md` and tracked in the roadmap.
+
+---
+
+## ADR-19 — Mesh DNS must follow the tun device
+
+**Status:** accepted (v2.1.1) · **Context:** a field report after the first
+successful `fleet ssh`: the config applied, `nebula -test` passed, the service
+restarted, `ping 10.100.0.1` worked — but `ping vps.ulno.mesh` answered
+`Name or service not known`. Nothing in the pushed config was wrong.
+
+**Decision.** `resolvectl dns`/`domain` attach to the *interface*, not to the
+resolver. Every Nebula start creates a new `nebula1` device, so the per-link
+settings are dropped on **any** restart (systemd restart, firefighter push,
+`relay local`, binary update). The boot hook (`nebula-manager-resolved.service`)
+now carries `PartOf=nebula.service`, so systemd restarts it with the service,
+and every path that restarts Nebula — `fleet ssh`, `fleet update`, `relay local`,
+the batch service restart — nudges the hook afterwards for hosts that still have
+the old unit.
+
+**Consequences.** A restart costs a second or two more (`ExecStartPre=sleep 2`)
+and idle DNS state is not preserved. Hosts without `systemd-resolved` are not
+affected (no hook, no nudge). When a new restart path is added, it must call
+`dns_reapply_after_restart` — or rely on `PartOf` if it really restarts
+`nebula.service` through systemd.

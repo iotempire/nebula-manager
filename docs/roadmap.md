@@ -53,6 +53,11 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       validates and restarts. `fleet bundle` renders the archives, `fleet serve`
       publishes them over HTTP (read-only, copyparty password, python fallback)
       and `fleet croc` shares them one receiver at a time with croc's own code.
+- [x] **Mesh DNS survives a restart** – `nebula-manager-resolved.service` has
+      `PartOf=nebula.service`, so systemd restarts it with Nebula, and
+      `fleet ssh`/`fleet update`/`relay local` nudge it after a restart for hosts
+      that still carry the old unit (a new tun device drops the per-link DNS
+      settings). See [ADR-19](decisions.md) and [dns.md](dns.md).
 - [x] **Serial SSH updates** – `fleet update --select …` pushes the same
       firewall/relay/config change to every selected node, one host after the
       other, with a result table. `--short` uses the first label of the

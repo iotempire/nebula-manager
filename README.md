@@ -10,7 +10,7 @@
 </p>
 
 > **Nebula Manager — academic edition.** ulno's academic spin on Jordan Hillis'
-> Nebula Manager **v2.1.0**. One friendly tool to install, configure, and operate
+> Nebula Manager **v2.1.1**. One friendly tool to install, configure, and operate
 > [Slack Nebula](https://github.com/slackhq/nebula): certificates, workspaces,
 > per-node configs, firewall policy, bundles, fleet deployment, diagnostics and
 > updates — with a plain-text UI and a complete headless CLI.
@@ -51,7 +51,7 @@ The full story, design principles and extension history are in
 **[docs/motivation.md](docs/motivation.md)**.
 
 ```text
-ulno's academic spin - orig: Jordan Hillis v2.1.0
+ulno's academic spin - orig: Jordan Hillis v2.1.1
 ```
 
 ---
@@ -353,5 +353,5 @@ firewall/group operations and the distribution guides were developed for
 teaching Nebula in a networking class.
 
 ```text
-ulno's academic spin - orig: Jordan Hillis v2.1.0
+ulno's academic spin - orig: Jordan Hillis v2.1.1
 ```

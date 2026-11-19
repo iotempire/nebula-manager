@@ -214,6 +214,10 @@ export NEBULA_BIN_PATH="$SANDBOX/bin"
 cat > "$SANDBOX/bin/systemctl" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${SYSTEMCTL_LOG:?}"
+# `systemctl cat UNIT` fails when the unit does not exist (like the real one).
+case "$1" in
+    cat) [[ -n "${FAKE_DNS_HOOK:-}" && -f "$FAKE_DNS_HOOK" ]] && exit 0; exit 1 ;;
+esac
 exit 0
 MOCK
 chmod +x "$SANDBOX/bin/systemctl"
@@ -327,5 +331,14 @@ assert_contains "the bad default is named" "$out" "Not an IP address"
 unset SERVER_CONF
 
 assert_eq "only the service restart needed root" "$(sudo_count)" "1"
+
+# --- the mesh DNS hook follows a restart (ADR-19) ---------------------------
+export FAKE_DNS_HOOK="$SANDBOX/dns-hook"; : > "$FAKE_DNS_HOOK"
+: > "$SUDO_LOG"
+out="$(relay_local_cli --nebula-config "$SANDBOX/local-lh.yml" --relay 10.91.0.4 2>&1)"
+assert_eq "a restart with the hook installed exits 0" "$?" "0"
+assert_contains "the service is restarted" "$(cat "$SUDO_LOG")" "systemctl restart nebula.service"
+assert_contains "the DNS hook is restarted with it" "$(cat "$SUDO_LOG")" "restart nebula-manager-resolved.service"
+unset FAKE_DNS_HOOK
 
 harness_summary

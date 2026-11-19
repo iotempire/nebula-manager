@@ -208,7 +208,11 @@ What `fleet ssh` does:
 5. uploads to a `/tmp` file on the remote host, backs up the old config
    (`<config>.bak.YYYYmmdd-HHMMSS`) and moves the new one into place;
 6. validates with `nebula -test` and restarts `--service` (default
-   `nebula.service`) unless `--no-restart`.
+   `nebula.service`) unless `--no-restart` — and then restarts
+   `nebula-manager-resolved.service`, because the new tun device starts without
+   the per-link mesh DNS settings (see [dns.md](dns.md); hosts whose hook has
+   `PartOf=nebula.service` restart it automatically, this also fixes older
+   ones).
 
 Root logins need no `sudo`; other users need `sudo`. For unattended runs
 (scripts, cron, CI) everything is key-only and `sudo -n`, so passwordless sudo is

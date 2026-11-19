@@ -1326,6 +1326,7 @@ _fleet_ssh_cli_body() {
         log_info "Service restart skipped (--no-restart)."
     elif _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }systemctl restart '$service'"; then
         log_success "Restarted $service on $FLEET_HOST"
+        _fleet_reapply_dns
     else
         log_warn "Could not restart $service on $FLEET_HOST; run it manually."
     fi
@@ -1543,6 +1544,18 @@ fleet_update_tui() {
     fleet_update_cli "${args[@]}"
 }
 
+# _fleet_reapply_dns ; after a restart the new tun device has no per-link DNS
+# settings (mesh names stop resolving). Newer hosts carry
+# nebula-manager-resolved.service with PartOf=nebula.service, so systemd already
+# restarted it; hosts installed earlier need this explicit nudge. Silent: a
+# missing unit is the normal case on hosts that never used mesh DNS.
+_fleet_reapply_dns() {
+    if _fleet_run_priv "${FLEET_SUDO:+$FLEET_SUDO }systemctl restart nebula-manager-resolved.service" >/dev/null 2>&1; then
+        log_info "Reapplied mesh DNS (nebula-manager-resolved.service)."
+    fi
+    return 0
+}
+
 # _fleet_apply_tty_session <newcfg> <remote_cfg> <service> <no_restart> <stamp> <remote_tmp>
 # Install the config with ONE privileged TTY session: the config travels as
 # base64 inside the script, so `sudo` (and its per-TTY timestamp) is only
@@ -1579,6 +1592,10 @@ EOF
         script+=$'\n'"    exit 1"
         script+=$'\n'"fi"
         script+=$'\n'"echo '[apply] restarted $service'"
+        # The new tun device starts without per-link DNS settings.
+        script+=$'\n'"if sudo systemctl restart nebula-manager-resolved.service >/dev/null 2>&1; then"
+        script+=$'\n'"    echo '[apply] reapplied mesh DNS (nebula-manager-resolved.service)'"
+        script+=$'\n'"fi"
     fi
     script+=$'\n'"echo 'nebula-manager: done'"
 

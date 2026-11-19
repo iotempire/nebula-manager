@@ -747,6 +747,7 @@ restart_nebula_servers() {
         printf "    ${BOLD}Restarting service for %-20s...${RESET} " "$SERVER_NAME_TEMP"
         if elevate_why "restart the Nebula service ($serviceName)" systemctl restart "$serviceName" &>/dev/null && systemctl is-active --quiet "$serviceName"; then
             echo -e "${GREEN}Success${RESET}"
+            declare -F dns_reapply_after_restart >/dev/null && dns_reapply_after_restart
         else
             touch "/tmp/nebula_failed_${SERVER_NAME_TEMP}"
             echo -e "${RED}Failed${RESET}"
@@ -2953,6 +2954,38 @@ configure_lighthouse_dns() {
     _dns_offer_restart
 }
 
+# Print the body of the oneshot unit that reapplies per-interface DNS.
+# PartOf= is what makes it survive a service restart: the tun device is
+# recreated on every start, and with it the per-link resolvectl settings.
+_dns_resolved_unit_body() {
+    local iface="$1" domain="$2" rc="$3" service="$4"; shift 4
+    local -a ips=("$@")
+    printf '[Unit]\n'
+    printf 'Description=Apply Nebula DNS settings to systemd-resolved\n'
+    printf 'After=%s\n' "$service"
+    printf 'PartOf=%s\n' "$service"
+    printf 'Wants=%s\n\n' "$service"
+    printf '[Service]\n'
+    printf 'Type=oneshot\n'
+    printf 'ExecStartPre=-/usr/bin/sleep 2\n'
+    printf 'ExecStart=-%s dns %s %s\n' "$rc" "$iface" "${ips[*]}"
+    printf 'ExecStart=-%s domain %s ~%s\n' "$rc" "$iface" "$domain"
+    printf 'RemainAfterExit=yes\n\n'
+    printf '[Install]\n'
+    printf 'WantedBy=multi-user.target\n'
+}
+
+# After any nebula restart the tun device (and its per-link DNS settings) is
+# new. Units installed by this version carry PartOf=nebula.service, so systemd
+# restarts them with the service; older hosts need an explicit nudge.
+dns_reapply_after_restart() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    systemctl cat nebula-manager-resolved.service >/dev/null 2>&1 || return 0
+    elevate_why "reapply the Nebula DNS settings after the restart" \
+        systemctl restart nebula-manager-resolved.service >/dev/null 2>&1 || true
+    return 0
+}
+
 # Install a oneshot unit that reapplies per-interface DNS after Nebula starts.
 _dns_install_resolved_unit() {
     local iface="$1" domain="$2"; shift 2
@@ -2960,20 +2993,7 @@ _dns_install_resolved_unit() {
     local rc; rc="$(command -v resolvectl)"
     local service; service="$(basename "${NEBULA_SERVICE:-nebula.service}")"
     local tmp; tmp="$(mktemp)"
-    {
-        printf '[Unit]\n'
-        printf 'Description=Apply Nebula DNS settings to systemd-resolved\n'
-        printf 'After=%s\n' "$service"
-        printf 'Wants=%s\n\n' "$service"
-        printf '[Service]\n'
-        printf 'Type=oneshot\n'
-        printf 'ExecStartPre=-/usr/bin/sleep 2\n'
-        printf 'ExecStart=-%s dns %s %s\n' "$rc" "$iface" "${ips[*]}"
-        printf 'ExecStart=-%s domain %s ~%s\n' "$rc" "$iface" "$domain"
-        printf 'RemainAfterExit=yes\n\n'
-        printf '[Install]\n'
-        printf 'WantedBy=multi-user.target\n'
-    } > "$tmp"
+    _dns_resolved_unit_body "$iface" "$domain" "$rc" "$service" "${ips[@]}" > "$tmp"
     local dest="/etc/systemd/system/nebula-manager-resolved.service"
     if ! elevate_why "install the Nebula DNS resolver unit ($dest)" cp "$tmp" "$dest"; then
         rm -f "$tmp"; return 1
@@ -2981,7 +3001,7 @@ _dns_install_resolved_unit() {
     rm -f "$tmp"
     elevate_why "reload systemd for the Nebula DNS unit" systemctl daemon-reload || return 1
     elevate_why "enable and start the Nebula DNS unit" systemctl enable --now nebula-manager-resolved.service || return 1
-    log_success "Installed $dest (reapplies DNS on boot)."
+    log_success "Installed $dest (reapplies DNS on boot and after $service restarts)."
 }
 
 # Client: point systemd-resolved at the lighthouse for the mesh DNS suffix.

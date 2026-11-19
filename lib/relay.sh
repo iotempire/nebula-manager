@@ -1084,6 +1084,8 @@ relay_local_cli() {
     fi
     if elevate_why "restart the Nebula service ($svc)" systemctl restart "$svc"; then
         log_success "Restarted $svc"
+        # The new tun device has no per-link DNS settings yet.
+        declare -F dns_reapply_after_restart >/dev/null && dns_reapply_after_restart
     else
         log_warn "Could not restart $svc; run it manually."
     fi

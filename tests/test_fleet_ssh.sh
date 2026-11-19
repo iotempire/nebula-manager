@@ -140,6 +140,15 @@ assert_contains "push uploaded via tee" "$(cat "$SSH_LOG")" "tee"
 assert_contains "push tested the config" "$(cat "$SSH_LOG")" "-test -config"
 assert_not_contains "no restart with --no-restart" "$(cat "$SSH_LOG")" "systemctl restart"
 
+# --- a restart reapplies mesh DNS -------------------------------------------
+: > "$SSH_LOG"
+out="$(fleet_ssh_cli node4 --policy home --yes --cert-dir "$keys" 2>&1)"; rc=$?
+assert_eq "push with restart exits 0" "$rc" "0"
+assert_contains "the service is restarted" "$out" "Restarted nebula.service"
+assert_contains "the DNS hook is restarted with the service" \
+    "$(cat "$SSH_LOG")" "systemctl restart nebula-manager-resolved.service"
+assert_contains "the DNS reapply is reported" "$out" "Reapplied mesh DNS"
+
 # --- root login: no sudo anywhere ------------------------------------------
 : > "$SSH_LOG"
 out="$(fleet_ssh_cli node4 --user root --config "$SANDBOX/push.yml" --dry-run --cert-dir "$keys" 2>&1)"; rc=$?
@@ -267,6 +276,11 @@ assert_contains "the restart is reported" "$out" "Restarted nebula.service"
 assert_eq "no separate upload step" "$(grep -c "tee '/tmp" "$SSH_LOG")" "0"
 assert_contains "sudo is prompted for at most twice" "$out" "sudo will ask for your password"
 assert_not_contains "no sudo warm-up in password mode" "$(cat "$SSH_LOG")" "sudo -v"
+payload_b64="$(grep '| bash' "$SSH_LOG" | tail -n1 | sed -n "s/.*printf %s '\([^']*\)'.*/\1/p")"
+payload="$(printf '%s' "$payload_b64" | base64 -d 2>/dev/null)"
+assert_contains "the privileged apply restarts the DNS hook" "$payload" "nebula-manager-resolved.service"
+assert_contains "the backup is only made once (retry-safe)" "$payload" "test -e"
+assert_contains "the validation is guarded" "$payload" "nebula -test FAILED"
 
 # passwordless sudo that only works with a TTY (sudoers requiretty)
 : > "$SSH_LOG"

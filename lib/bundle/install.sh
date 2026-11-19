@@ -479,6 +479,7 @@ install_resolved_hook() {
         printf '[Unit]\n'
         printf 'Description=Apply Nebula DNS settings to systemd-resolved\n'
         printf 'After=%s\n' "$SVC"
+        printf 'PartOf=%s\n' "$SVC"
         printf 'Wants=%s\n\n' "$SVC"
         printf '[Service]\n'
         printf 'Type=oneshot\n'
@@ -493,7 +494,7 @@ install_resolved_hook() {
     if asroot cp "$tmp" "$dest"; then
         asroot systemctl daemon-reload >/dev/null 2>&1 || true
         if asroot systemctl enable --now nebula-manager-resolved.service >/dev/null 2>&1; then
-            say "Installed $dest (reapplies mesh DNS on boot)"
+            say "Installed $dest (reapplies mesh DNS on boot and after $SVC restarts)"
         else
             warn "could not enable nebula-manager-resolved.service"
         fi

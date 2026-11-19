@@ -40,8 +40,18 @@ sudo resolvectl domain nebula1 '~theprof.mesh'
 ```
 
 Option 2 also installs `nebula-manager-resolved.service`, which reapplies the
-settings after `nebula.service` starts. Only the mesh suffix is routed to
-Nebula, so public DNS keeps working.
+settings after `nebula.service` starts **and after every restart**: the unit has
+`PartOf=nebula.service`, so systemd restarts it together with Nebula. Only the
+mesh suffix is routed to Nebula, so public DNS keeps working.
+
+**Why this matters.** `resolvectl dns`/`domain` attach to the interface, not to
+the resolver. Every Nebula start creates a new `nebula1` device, so any restart
+(`systemctl restart nebula.service`, a firewall push, `relay local`, an update)
+would silently drop mesh name resolution — `ping vps.ulno.mesh` then fails with
+`Name or service not known` while the overlay itself keeps working (`ping
+10.100.0.1` succeeds). Hosts whose hook was installed before v2.1.1 have no
+`PartOf=`; `nebula-manager fleet ssh`/`fleet update` restart the hook explicitly
+after a service restart, and `nebula-manager dns persist` rewrites the unit.
 
 ### Bundles set it up on install
 

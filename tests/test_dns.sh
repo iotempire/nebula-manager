@@ -91,6 +91,14 @@ assert_eq "client DNS persist succeeds" "$rc" "0"
 assert_contains "persist installs the resolver unit" "$(cat "$SUDO_LOG")" "nebula-manager-resolved.service"
 assert_contains "persist enables the resolver unit" "$(cat "$SUDO_LOG")" "systemctl enable --now"
 
+# The hook must be restarted together with nebula.service: a restart creates a
+# new tun device, and the per-link resolvectl settings die with the old one.
+unit_body="$(_dns_resolved_unit_body lo theprof.mesh /usr/bin/resolvectl nebula.service 10.100.0.1)"
+assert_contains "the boot hook is ordered after the service" "$unit_body" "After=nebula.service"
+assert_contains "the boot hook is restarted with the service" "$unit_body" "PartOf=nebula.service"
+assert_contains "the boot hook reapplies the DNS server" "$unit_body" "resolvectl dns lo 10.100.0.1"
+assert_contains "the boot hook reapplies the mesh suffix" "$unit_body" "resolvectl domain lo ~theprof.mesh"
+
 # --- the interactive action menu actually reaches the action -----------------
 : > "$SUDO_LOG"
 out="$(printf '2\n' | NEBULA_DIR="$CLIENT" manage_name_resolution 2>&1)"; rc=$?
