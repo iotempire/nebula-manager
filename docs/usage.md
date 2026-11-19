@@ -160,9 +160,10 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager fleet croc --dir fleet-bundles-20261025-101500 --dry-run
 ./nebula-manager fleet probe node4
 ./nebula-manager fleet ssh node4 --policy home --yes
-./nebula-manager fleet ssh node4 --relay 10.100.0.1 --interactive   # allow password/sudo prompts
+./nebula-manager fleet ssh node4 --relay 10.100.0.1      # prompts for passwords only if needed
+./nebula-manager fleet ssh node4 --no-interactive        # keys only (scripts/CI)
 ./nebula-manager fleet ssh node4 --config ./config.yml --dry-run
-./nebula-manager fleet update --select group:lab01 --policy lab01 --interactive
+./nebula-manager fleet update --select group:lab01 --policy lab01   # prompts only if needed
 ./nebula-manager fleet update --select name:router* --short --no-relay --yes
 
 # Utilities

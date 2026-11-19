@@ -210,32 +210,46 @@ What `fleet ssh` does:
 6. validates with `nebula -test` and restarts `--service` (default
    `nebula.service`) unless `--no-restart`.
 
-Root logins need no `sudo`; other users need `sudo`. Unattended runs (keys only)
-require passwordless sudo. If sudo asks for a password, add `--interactive`.
+Root logins need no `sudo`; other users need `sudo`. For unattended runs
+(scripts, cron, CI) everything is key-only and `sudo -n`, so passwordless sudo is
+required. When **you** run it at a terminal, the manager asks for passwords when
+they are actually needed — see below.
+
 `--dry-run` still fetches (read-only) and prints the exact commands without
 changing anything.
 
 ### Typing passwords (ssh and remote sudo)
 
-```bash
-nebula-manager fleet ssh node4 --policy home --interactive
-```
+**Nothing to add for normal use.** The decision is automatic:
 
-`--interactive` is the “walk me through the login” mode:
+| Situation | Behaviour |
+|---|---|
+| You run it in a terminal (`NEBULA_NO_PROMPT` unset) | keys first; if that fails, one password attempt; if sudo needs a password, it is asked once |
+| Script, cron, CI, or `NEBULA_NO_PROMPT=1` | keys only, `sudo -n`; a sudo password is an error |
+| `--interactive` | always allow password prompts |
+| `--no-interactive` (alias `--batch`) | never prompt, even in a terminal |
 
-- **ssh** may use a password (`publickey,password,keyboard-interactive`) — you are
-  prompted once and the manager then reuses **one SSH connection**
-  (`ControlMaster`), so later steps do not ask again;
+When prompts are allowed:
+
+- **ssh** may use a password (`publickey,password,keyboard-interactive`). If the
+  key login does not work, the manager tries one password login for the most
+  likely account, then offers to try a different user;
+- after that it reuses **one SSH connection** (`ControlMaster`), so later steps
+  do not ask again;
 - the **remote sudo** timestamp is warmed once through that session (`sudo -v`),
   so the backup, the config write, `nebula -test` and the restart do not prompt
   again;
-- if sudo still needs a TTY (`requiretty`), the manager switches those commands
-  to `ssh -tt`, so sudo can prompt right there in your terminal;
+- if sudo still needs a TTY (`requiretty`), those commands switch to `ssh -tt`,
+  so sudo can prompt right there in your terminal;
 - the remote temp file (`/tmp/nebula-manager-config.<pid>.yml`) is always
   written by you, and only the final copy is elevated.
 
-Without `--interactive` everything is key-only and `sudo -n`, which is what you
-want for scripts and cron.
+```bash
+# force prompts (e.g. inside a pipeline where stdin is not a terminal)
+nebula-manager fleet ssh node4 --policy home --interactive
+# force keys-only in a terminal (testing that keys/sudoers really work)
+nebula-manager fleet ssh node4 --policy home --no-interactive
+```
 
 ### Updating several nodes, one after the other
 
@@ -274,6 +288,9 @@ Fleet update summary:
   name is used (`--short` = first label only). The probe still tries
   `<name>.<domain>`, `.netbird.cloud`, `.local` and the bare name, so a
   locally-reachable host works without extra flags.
+- Authentication follows the same automatic rule as `fleet ssh` (prompts when you
+  are at a terminal, keys-only in scripts); `--interactive` / `--no-interactive`
+  force one behaviour for the whole run.
 - Device certificates (no local key) are skipped.
 - Failures do not stop the run; the summary lists them and the exit code is
   non-zero.

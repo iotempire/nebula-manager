@@ -409,12 +409,13 @@ Commands:
                                   time; croc prints the three-word code.
   fleet ssh TARGET [--policy PACK|--firewall MODE|--firewall-file FILE|
                     --relay IP|--no-relay|--config FILE] [--yes] [--dry-run]
-                    [--no-restart] [--interactive]
+                    [--no-restart] [--interactive|--no-interactive]
                                   Fetch a remote config, merge the firewall or
                                   relay block, show a diff, upload with a backup,
                                   validate and restart. Names expand via cert
-                                  domains/NetBird. --interactive allows password
-                                  logins and a sudo password on the remote host.
+                                  domains/NetBird. Password/sudo prompts happen
+                                  automatically in a terminal (--interactive
+                                  forces them, --no-interactive forbids them).
   fleet update [--select SPEC] [--short|--host H] [--user U] [--interactive]
                --policy PACK|--relay IP|--no-relay|--config FILE [...]
                                   Push the same change to every selected node,

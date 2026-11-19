@@ -210,6 +210,25 @@ assert_contains "serial update lists the second node" "$out" "bob.theprof.mesh  
 assert_contains "serial update skips device certificates" "$out" "device certificate"
 assert_contains "serial update reports the skip count" "$out" "2 updated, 0 failed, 1 skipped"
 
+# --- how the auth mode is decided ------------------------------------------
+assert_eq "interactive mode: forced on" \
+    "$(FLEET_INTERACTIVE_MODE=on; _fleet_want_interactive; echo $?)" "0"
+assert_eq "interactive mode: forced off" \
+    "$(FLEET_INTERACTIVE_MODE=off; _fleet_want_interactive; echo $?)" "1"
+assert_eq "interactive mode: auto is key-only when prompts are disabled" \
+    "$(FLEET_INTERACTIVE_MODE=auto; NEBULA_NO_PROMPT=1; _fleet_want_interactive; echo $?)" "1"
+
+rm -f "$HOME/.sudo-warm"
+out="$(SUDO_NEEDS_PASSWORD=1 fleet_ssh_cli node4 --policy home \
+    --interactive --no-interactive --dry-run 2>&1)"; rc=$?
+assert_ne "--no-interactive wins over --interactive" "$rc" "0"
+assert_contains "forced key-only explains the requirement" "$out" "passwordless sudo"
+
+out="$(SUDO_NEEDS_PASSWORD=1 fleet_update_cli --select cert:alice.theprof.mesh \
+    --host node5.theprof.net --policy home --yes --no-interactive --dry-run 2>&1)"; rc=$?
+assert_eq "fleet update forwards --no-interactive" "$rc" "1"
+assert_contains "fleet update reports the failed host" "$out" "1 failed"
+
 # --- helpers ----------------------------------------------------------------
 assert_eq "full host helper" "$(_fleet_host_for a.b.mesh 0)" "a.b.mesh"
 assert_eq "short host helper" "$(_fleet_host_for a.b.mesh 1)" "a"

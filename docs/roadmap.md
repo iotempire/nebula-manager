@@ -56,9 +56,10 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
 - [x] **Serial SSH updates** – `fleet update --select …` pushes the same
       firewall/relay/config change to every selected node, one host after the
       other, with a result table. `--short` uses the first label of the
-      certificate name, `--host` forces one host, and `--interactive` walks
-      through password auth and a remote sudo password (one shared SSH session,
-      sudo timestamp warmed once, `ssh -tt` when sudo needs a TTY). TUI:
+      certificate name, `--host` forces one host. Authentication is automatic:
+      at a terminal (and `NEBULA_NO_PROMPT` unset) keys are tried first, then one
+      password login, then a warmed `sudo -v`; scripts/cron stay key-only.
+      `--interactive` / `--no-interactive` force either behaviour. TUI:
       *Fleet ▸ Update node(s) over SSH*.
 - [x] **Single-file release build** – `make build` (`make release` alias)
       generates `dist/nebula-manager` with modules and runtime assets embedded,

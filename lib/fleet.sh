@@ -727,6 +727,22 @@ FLEET_AUTH_INTERACTIVE=${FLEET_AUTH_INTERACTIVE:-0}
 FLEET_SUDO_TTY=${FLEET_SUDO_TTY:-0}
 FLEET_SSH_MASTER=${FLEET_SSH_MASTER:-}
 
+# _fleet_want_interactive ; is a password prompt useful right now?
+# FLEET_INTERACTIVE_MODE=auto (default) allows prompts when a human is at a
+# terminal and NEBULA_NO_PROMPT is not set. In cron/CI, and in every test (the
+# harness sets NEBULA_NO_PROMPT=1), it stays key-only. --interactive and
+# --no-interactive override the decision.
+_fleet_want_interactive() {
+    case "${FLEET_INTERACTIVE_MODE:-auto}" in
+        on|1|yes|true)  return 0 ;;
+        off|0|no|false) return 1 ;;
+    esac
+    [[ "${NEBULA_NO_PROMPT:-0}" == 1 ]] && return 1
+    [[ -t 0 ]] && return 0
+    [[ -t 2 && -r /dev/tty ]] && return 0
+    return 1
+}
+
 # _fleet_ssh_master_start <user> <host> <port>
 # Open a reusable connection (asks for the ssh password at most once).
 _fleet_ssh_master_start() {
@@ -887,16 +903,16 @@ fleet_probe() {
         done
     done
     if [[ -z "$found_user" && "$_saved_interactive" == 1 ]]; then
-        # Interactive mode: retry with password auth. ssh prompts for each
-        # candidate in turn; the first success wins.
+        # Interactive mode: one password attempt for the most likely user (the
+        # current one). Trying every candidate would mean several prompts in a
+        # row; the question below lets the user name another account instead.
         FLEET_AUTH_INTERACTIVE=1
-        log_info "No key worked; trying a password login (you will be prompted)."
+        local first_user="${uuniq[0]}"
+        log_info "No key login worked; trying a password login as $first_user (you will be prompted)."
         for h in "${open[@]}"; do
-            for u in "${uuniq[@]}"; do
-                if _fleet_ssh "$u" "$h" "$port" true >/dev/null 2>&1; then
-                    found_user="$u"; found_host="$h"; break 2
-                fi
-            done
+            if _fleet_ssh "$first_user" "$h" "$port" true >/dev/null 2>&1; then
+                found_user="$first_user"; found_host="$h"; break
+            fi
         done
     fi
     FLEET_AUTH_INTERACTIVE="$_saved_interactive"
@@ -991,9 +1007,13 @@ Connection / safety:
   --domain DOMAIN        Also try <target>.DOMAIN (repeatable)
   --user USER            Extra login candidate (repeatable)
   --port N               SSH port (default: 22)
-  --interactive          Allow password/keyboard-interactive logins and let
-                         sudo ask for a password on the remote host (one shared
-                         SSH session; typed once). Without it: keys + sudo -n.
+  --interactive          Force password/keyboard-interactive logins and let sudo
+                         ask for a password on the remote host (one shared SSH
+                         session; typed once).
+  --no-interactive       Never prompt: keys only, sudo must be passwordless.
+                         (Default: prompts are allowed when you are at a
+                         terminal and NEBULA_NO_PROMPT is not set; scripts,
+                         cron and CI stay key-only.)
   --service NAME         systemd unit (default: nebula.service)
   --yes                  Do not ask before applying
   --dry-run              Show the planned remote commands; change nothing
@@ -1019,7 +1039,7 @@ fleet_ssh_cli() {
 _fleet_ssh_cli_body() {
     local target="" port=22 policy="" fw_mode="" fw_file="" config_file="" remote_cfg="/etc/nebula/config.yml"
     local service="nebula.service" assume_yes=0 dry=0 no_restart=0 cert_dir=""
-    local relay_csv="" relay_off=0 interact=0
+    local relay_csv="" relay_off=0 interact=auto
     FLEET_SSH_TMP=()
     local -a extra_hosts=() extra_users=() extra_domains=()
     while (( $# )); do
@@ -1049,8 +1069,8 @@ _fleet_ssh_cli_body() {
             --service=*)     service="${1#*=}" ;;
             --cert-dir)      shift; cert_dir="${1:-}" ;;
             --cert-dir=*)    cert_dir="${1#*=}" ;;
-            --interactive|--ask-auth|--ask-password) interact=1 ;;
-            --batch|--no-interactive) interact=0 ;;
+            --interactive|--ask-auth|--ask-password) interact=on ;;
+            --batch|--no-interactive) interact=off ;;
             --yes|-y)        assume_yes=1 ;;
             --dry-run|-n)    dry=1 ;;
             --no-restart)    no_restart=1 ;;
@@ -1131,7 +1151,12 @@ _fleet_ssh_cli_body() {
     for h in "${extra_hosts[@]}"; do probe_args+=(--host "$h"); done
     for d in "${extra_domains[@]}"; do probe_args+=(--domain "$d"); done
     for u in "${extra_users[@]}"; do probe_args+=(--user "$u"); done
-    FLEET_AUTH_INTERACTIVE="$interact"
+    FLEET_INTERACTIVE_MODE="$interact"
+    if _fleet_want_interactive; then
+        FLEET_AUTH_INTERACTIVE=1
+    else
+        FLEET_AUTH_INTERACTIVE=0
+    fi
     FLEET_SUDO_TTY=0
     fleet_probe "$target" "${probe_args[@]}" || return 1
 
@@ -1271,8 +1296,9 @@ Hosts and login:
   --host HOST                   force one host/user@host for every node
   --user USER                   login candidate (repeatable)
   --port N                      SSH port (default: 22)
-  --interactive                 allow password logins and a remote sudo password
+  --interactive                 force password logins and a remote sudo password
                                 (one shared SSH session, prompts once per host)
+  --no-interactive              never prompt (keys only; default in scripts)
 
 Safety:
   --yes            do not ask per node (required for a fully unattended run)
@@ -1314,6 +1340,7 @@ fleet_update_cli() {
             --user=*|--port=*|--policy=*|--firewall=*|--firewall-file=*|--config=*|--relay=*|--service=*|--remote-config=*)
                 fwd+=("$1") ;;
             --interactive|--ask-auth|--ask-password) fwd+=(--interactive) ;;
+            --no-interactive|--batch) fwd+=(--no-interactive) ;;
             --yes|-y)        yes=1; fwd+=(--yes) ;;
             --dry-run|-n)    dry=1; fwd+=(--dry-run) ;;
             --no-restart)    fwd+=(--no-restart) ;;
@@ -1407,9 +1434,13 @@ fleet_update_tui() {
 
     local auth
     auth="$(ui_menu "Deploy" "Authentication:" \
-        keys        "Keys only (passwordless sudo needed)" \
-        interactive "Allow password prompts (ssh password + remote sudo)")" || return 0
-    [[ "$auth" == "interactive" ]] && args+=( --interactive )
+        auto        "Automatic: prompt only if keys are not enough" \
+        keys        "Keys only (requires passwordless sudo)" \
+        interactive "Always allow password prompts (ssh password + remote sudo)")" || return 0
+    case "$auth" in
+        keys)        args+=( --no-interactive ) ;;
+        interactive) args+=( --interactive ) ;;
+    esac
 
     local what
     what="$(ui_menu "Deploy" "What should change on the remote node(s)?" \

@@ -192,8 +192,8 @@ that group if the phone should reach them.
 |---|---|---|
 | Node not installed yet | `cert bundle` / `fleet bundle` → hand out | student runs `install.sh` |
 | Whole class, one URL | `fleet bundle` + `fleet serve` | nothing |
-| One node you can SSH into | `fleet ssh NODE --policy PACK` (or `--relay`) | key login + passwordless sudo, or `--interactive` |
-| Several nodes, one after the other | `fleet update --select … --policy PACK --interactive` | per-host login, passwords typed once per host |
+| One node you can SSH into | `fleet ssh NODE --policy PACK` (or `--relay`) | key login; sudo password is asked once at a terminal, `--no-interactive` for keys-only |
+| Several nodes, one after the other | `fleet update --select … --policy PACK` | same; each host prompts only if needed |
 | Many existing nodes, new firewall | `cert firewall … --select … --yes` | re-hand-out or push the new config |
 | Many existing nodes, new relay | `cert relay … --select … --rebundle` | re-hand-out or push |
 | This host only | `policy apply`, `relay local` | service restart (done for you) |
