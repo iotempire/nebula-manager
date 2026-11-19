@@ -191,9 +191,17 @@ nebula-manager fleet probe node4 --domain theprof.net --domain netbird.cloud
 
 nebula-manager fleet ssh node4 --policy home --yes
 nebula-manager fleet ssh node4 --config ./node4-config.yml --dry-run
+nebula-manager fleet ssh node4 --from-store --dry-run     # <cert-dir>/<node4>.yml
 nebula-manager fleet ssh node4 --firewall-file ./policies/node4/firewall.yml
 nebula-manager fleet ssh root@node4.theprof.mesh --firewall permissive --no-restart
 ```
+
+`--from-store` pushes `<cert-dir>/<name>.yml`, the config the manager wrote next
+to the certificate (firewall, relay, lighthouse — everything the store knows
+about that node). It is the right choice when you want a node to match what the
+workspace says, whereas `--policy`/`--relay` merge a *single* aspect into the
+node's existing file and leave everything else alone. `--config FILE` replaces
+the remote file with a file you name.
 
 What `fleet ssh` does:
 
@@ -329,8 +337,9 @@ Fleet update summary:
   non-zero.
 - **TUI:** *Fleet ▸ Update node(s) over SSH* walks through: nodes → host name
   (full/short/custom) → login user (current/root/user/other) → keys or
-  `--interactive` → what to change (policy pack, built-in mode, relay, both, or a
-  whole `config.yml`).
+  `--interactive` → what to change: a policy pack, a built-in mode, the relay,
+  relay + pack, **each node's stored `<name>.yml`**, or another config file you
+  name (the prompt already suggests the stored config of the node you selected).
 
 ---
 

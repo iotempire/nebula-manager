@@ -149,6 +149,24 @@ assert_contains "the DNS hook is restarted with the service" \
     "$(cat "$SSH_LOG")" "systemctl restart nebula-manager-resolved.service"
 assert_contains "the DNS reapply is reported" "$out" "Reapplied mesh DNS"
 
+# --- --from-store pushes each node's own stored config ----------------------
+printf 'tun:\n  dev: nebula9\n' > "$keys/alice.theprof.mesh.yml"
+out="$(fleet_ssh_cli alice.theprof.mesh --host node4.theprof.mesh --from-store \
+    --cert-dir "$keys" --dry-run 2>&1)"; rc=$?
+assert_eq "--from-store dry-run exits 0" "$rc" "0"
+assert_contains "--from-store pushes the stored node config" "$out" "nebula9"
+
+out="$(fleet_update_cli --select cert:alice.theprof.mesh --host node5.theprof.net \
+    --from-store --cert-dir "$keys" --dry-run --yes 2>&1)"; rc=$?
+assert_eq "fleet update forwards --from-store" "$rc" "0"
+assert_contains "fleet update renders the per-node config" "$out" "nebula9"
+
+rm -f "$keys/alice.theprof.mesh.yml"
+out="$(fleet_ssh_cli alice.theprof.mesh --host node4.theprof.mesh --from-store \
+    --cert-dir "$keys" --dry-run 2>&1)"; rc=$?
+assert_ne "--from-store without a stored config fails" "$rc" "0"
+assert_contains "the missing store config is explained" "$out" "cert config generate"
+
 # --- root login: no sudo anywhere ------------------------------------------
 : > "$SSH_LOG"
 out="$(fleet_ssh_cli node4 --user root --config "$SANDBOX/push.yml" --dry-run --cert-dir "$keys" 2>&1)"; rc=$?

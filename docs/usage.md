@@ -163,6 +163,8 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager fleet ssh node4 --relay 10.100.0.1      # prompts for passwords only if needed
 ./nebula-manager fleet ssh node4 --no-interactive        # keys only (scripts/CI)
 ./nebula-manager fleet ssh node4 --config ./config.yml --dry-run
+./nebula-manager fleet ssh node4 --from-store --yes             # push <cert-dir>/<node4>.yml
+./nebula-manager fleet update --select group:lab01 --from-store --yes   # each node's own .yml
 ./nebula-manager fleet update --select group:lab01 --policy lab01   # prompts only if needed
 ./nebula-manager fleet update --select name:router* --short --no-relay --yes
 

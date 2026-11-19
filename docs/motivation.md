@@ -13,7 +13,7 @@ teaching, least-privilege operation and reproducible classroom workflows.
 The credit line used throughout the project is:
 
 ```text
-ulno's academic spin - orig: Jordan Hillis v2.1.1
+ulno's academic spin - orig: Jordan Hillis v2.2.0
 ```
 
 ## Why a fork?

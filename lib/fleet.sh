@@ -1035,6 +1035,7 @@ Change the remote config:
   --relay IP[,IP]        set relay.use_relays + the relay list (repeatable)
   --no-relay             remove the remote relay: block
   --config FILE          push this complete config.yml instead of merging
+  --from-store           push <cert-dir>/<name>.yml (the node's stored config)
   --remote-config PATH   Remote config path (default: /etc/nebula/config.yml)
 
 Connection / safety:
@@ -1073,7 +1074,7 @@ fleet_ssh_cli() {
 
 _fleet_ssh_cli_body() {
     local target="" port=22 policy="" fw_mode="" fw_file="" config_file="" remote_cfg="/etc/nebula/config.yml"
-    local service="nebula.service" assume_yes=0 dry=0 no_restart=0 cert_dir=""
+    local service="nebula.service" assume_yes=0 dry=0 no_restart=0 cert_dir="" from_store=0 store_name=""
     local relay_csv="" relay_off=0 interact=auto
     FLEET_SSH_TMP=()
     local -a extra_hosts=() extra_users=() extra_domains=()
@@ -1095,6 +1096,8 @@ _fleet_ssh_cli_body() {
             --firewall-file=*) fw_file="${1#*=}" ;;
             --config)        shift; config_file="${1:-}" ;;
             --config=*)      config_file="${1#*=}" ;;
+            --from-store)    from_store=1 ;;
+            --from-store=*)  from_store=1; store_name="${1#*=}" ;;
             --relay)         shift; relay_csv="${relay_csv:+$relay_csv,}${1:-}" ;;
             --relay=*)       relay_csv="${relay_csv:+$relay_csv,}${1#*=}" ;;
             --no-relay)      relay_off=1 ;;
@@ -1118,6 +1121,20 @@ _fleet_ssh_cli_body() {
     [[ -n "$target" ]] || { fleet_ssh_usage >&2; return 2; }
     _fleet_path_valid "$remote_cfg" || { log_error "Invalid remote config path: $remote_cfg"; return 2; }
     _fleet_svc_valid "$service"    || { log_error "Invalid service name: $service"; return 2; }
+
+    # --from-store: the per-node config written next to the certificate, which is
+    # what "everything the store knows about this node" means in practice.
+    if (( from_store )); then
+        [[ -n "$store_name" ]] || store_name="${target##*@}"
+        [[ -n "$cert_dir" ]] || cert_dir="$(resolve_cert_dir)"
+        config_file="$cert_dir/$store_name.yml"
+        if [[ ! -f "$config_file" ]]; then
+            log_error "No stored node config: $config_file"
+            log_info "Create it with: nebula-manager cert config generate --all --force"
+            log_info "Or push another file with --config FILE."
+            return 1
+        fi
+    fi
 
     local pack_path="" fw_tmp=""
 
@@ -1351,7 +1368,8 @@ you deploy a single node).
 What to change (same flags as `fleet ssh`):
   --policy PACK | --firewall MODE | --firewall-file FILE
   --relay IP[,IP] | --no-relay
-  --config FILE                 push a complete config.yml
+  --from-store                  push each node's own <cert-dir>/<name>.yml
+  --config FILE                 push the same complete config.yml to every node
 
 Selection (default: all certificates with a local key):
   --select SPEC                 group:G, without:G, name:GLOB, ip:CIDR, cert:NAME, all
@@ -1389,6 +1407,7 @@ _fleet_host_for() {
 fleet_update_cli() {
     local cert_dir="" style=0 host_override="" dry=0 yes=0
     local -a selects=() excludes=() fwd=()
+    local from_store=0
     while (( $# )); do
         case "$1" in
             --cert-dir)      shift; cert_dir="${1:-}"; if (( $# )); then shift; fi; continue ;;
@@ -1412,14 +1431,15 @@ fleet_update_cli() {
             --dry-run|-n)    dry=1; fwd+=(--dry-run) ;;
             --no-restart)    fwd+=(--no-restart) ;;
             --no-relay)      fwd+=(--no-relay) ;;
+            --from-store|--from-store=*) from_store=1 ;;
             -h|--help)       fleet_update_usage; return 0 ;;
             -*) log_error "Unknown option for 'fleet update': $1"; fleet_update_usage; return 2 ;;
             *)  log_error "Unexpected argument for 'fleet update': $1 (use --host for one host)"; return 2 ;;
         esac
         shift
     done
-    (( ${#fwd[@]} )) || {
-        log_error "Nothing to change: pass --policy, --firewall, --firewall-file, --relay, --no-relay or --config."
+    (( ${#fwd[@]} )) || (( from_store )) || {
+        log_error "Nothing to change: pass --policy, --firewall, --firewall-file, --relay, --no-relay, --from-store or --config."
         return 2
     }
     cert_dir="${cert_dir:-$(resolve_cert_dir)}"
@@ -1444,7 +1464,10 @@ fleet_update_cli() {
         host="$(_fleet_host_for "$name" "$style")"
         [[ -n "$host_override" ]] && host="$host_override"
         printf '\n=== %d/%d  %s  ->  %s ===\n' "$((i + 1))" "$total" "$name" "$host"
-        if fleet_ssh_cli "$host" --cert-dir "$cert_dir" "${fwd[@]}"; then
+        local -a call_args=("${fwd[@]}")
+        # --from-store is per node: hand the certificate name to this call.
+        (( from_store )) && call_args+=("--from-store=$name")
+        if fleet_ssh_cli "$host" --cert-dir "$cert_dir" "${call_args[@]}"; then
             labels+=("$name"); states+=("updated"); ok=$((ok + 1))
         else
             labels+=("$name"); states+=("failed"); bad=$((bad + 1))
@@ -1464,6 +1487,23 @@ fleet_update_cli() {
 }
 
 # TUI: walk through "which node(s), which host, which login, what to change".
+# _fleet_ask_config_file <title> [default-path]
+# Ask for a local config.yml, expand `~`, and verify it exists - re-asking is
+# cheaper than failing after the SSH work has already started.
+_fleet_ask_config_file() {
+    local title="$1" def="${2:-}" path tries=0
+    while (( tries < 3 )); do
+        path="$(ui_input "$title" "Local config.yml to push:" "$def")" || return 1
+        [[ -n "$path" ]] || return 1
+        path="${path/#\~/$HOME}"
+        if [[ -f "$path" ]]; then printf '%s' "$path"; return 0; fi
+        log_error "No such file: $path"
+        def=""
+        tries=$(( tries + 1 ))
+    done
+    return 1
+}
+
 fleet_update_tui() {
     local cert_dir; cert_dir="$(resolve_cert_dir)"
     cert_select_tui "$cert_dir" || return 0
@@ -1515,7 +1555,8 @@ fleet_update_tui() {
         mode       "Firewall: a built-in mode (default / permissive)" \
         relay      "Relay: use the default relay" \
         relay_pack "Both: relay + firewall pack" \
-        config     "A complete config.yml")" || return 0
+        store      "Everything from the stored config of each node (<name>.yml)" \
+        config     "A complete config.yml file that I name") " || return 0
 
     local pack="" addr="" mode="" cfg=""
     case "$what" in
@@ -1535,9 +1576,25 @@ fleet_update_tui() {
                 permissive "Permissive (bootstrap only)")" || return 0
             args+=( --firewall "$mode" ) ;;
         pack|relay_pack) args+=( --policy "$pack" ) ;;
+        store)
+            # The per-node configs in the workspace: firewall, relay, everything.
+            local n missing=()
+            for n in "${SEL_NAMES[@]}"; do
+                [[ -f "$cert_dir/$n.yml" ]] || missing+=("$n")
+            done
+            if (( ${#missing[@]} )); then
+                log_error "No stored node config for: ${missing[*]}"
+                log_info "Create them with: nebula-manager cert config generate --all --force"
+                log_info "Then pick this option again (or choose another entry)."
+                return 0
+            fi
+            args+=( --from-store ) ;;
         config)
-            cfg="$(ui_input "Deploy" "Local config.yml to push:")" || return 0
-            [[ -n "$cfg" ]] || return 0
+            local def=""
+            if (( ${#SEL_NAMES[@]} == 1 )) && [[ -f "$cert_dir/${SEL_NAMES[0]}.yml" ]]; then
+                def="$cert_dir/${SEL_NAMES[0]}.yml"
+            fi
+            cfg="$(_fleet_ask_config_file "Deploy" "$def")" || return 0
             args+=( --config "$cfg" ) ;;
     esac
 
@@ -1776,6 +1833,7 @@ fleet_ssh_tui() {
         done
     fi
     popts+=( __relay__ "Set relay settings (use_relays + relays)" )
+    popts+=( __store__ "Push the node's stored config (<name>.yml in the workspace)" )
     popts+=( __file__ "Push a complete config.yml file" )
     local choice
     choice="$(ui_menu "Fleet SSH" "What should be applied on $target?" "${popts[@]}")" || return 0
@@ -1788,9 +1846,12 @@ fleet_ssh_tui() {
             [[ -n "$addr" ]] || return 0
             args+=( --relay "$addr" ) ;;
         __file__)
-            local f; f="$(ui_input "Fleet SSH" "Local config.yml to push:")" || return 0
-            [[ -z "$f" ]] && return 0
+            local f def="" cdir
+            cdir="$(resolve_cert_dir)"
+            [[ -f "$cdir/${target##*@}.yml" ]] && def="$cdir/${target##*@}.yml"
+            f="$(_fleet_ask_config_file "Fleet SSH" "$def")" || return 0
             args+=( --config "$f" ) ;;
+        __store__) args+=( --from-store ) ;;
         *) args+=( --policy "$choice" ) ;;
     esac
     fleet_ssh_cli "${args[@]}"
