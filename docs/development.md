@@ -34,6 +34,13 @@ run_tests.sh            # test runner (also: make test)
 `nebula-manager.sh` is kept as a thin **backwards-compatibility shim** that
 re-execs the real entrypoint.
 
+- **Why it is shaped this way:** [`decisions.md`](decisions.md) is the living ADR
+  log (least privilege, `/16` overlay, relay support, class distribution, …).
+  Change a user-visible behaviour or a safety rule ⇒ add an entry.
+- **Working with an AI agent:** [`../AGENT.md`](../AGENT.md) lists the ground
+  rules, the four registration points for a new module, the test workflow and
+  the pitfalls that have bitten us.
+
 ### Single-file release build
 
 `lib/` remains the canonical source; the release artifact is generated, never

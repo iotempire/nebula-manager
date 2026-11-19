@@ -146,6 +146,60 @@ after a first-hand run.
 
 ---
 
+## Ideas (not scheduled, no promise)
+
+Collected while building the relay/fleet work. Each is small enough to pick up
+independently; promote to a checkbox above when it is actually planned.
+
+**Relays** (see [relay.md](relay.md), ADR-14/15)
+
+- `cert relay --relay` without an address could suggest the lighthouse(s) found
+  in the workspace instead of failing.
+- A `diag` hint for “this node is relaying everything”: compare the relay list
+  with the certs' networks and say so when a segment could connect directly.
+- Selector support for relay state (`relay:on`, `relay:off`, `relay:none`) so
+  batch commands can target “whoever uses a relay” without `--show` + copy.
+- Warn in `cert bundle` when a **peer** bundle has `use_relays` but the relay
+  certificate in `relays:` expires before the client certificate.
+- `relay local --use-relays off` ships, but a `relay local --status --json`
+  would help monitoring/scripts.
+
+**Fleet & distribution**
+
+- **`fleet pack`** – one archive with a folder per node for a class (the only
+  shape where “download once, everybody gets it” works; a bundle is bound to one
+  certificate).
+- QR code for the `fleet serve` URL (`qrencode`-free: render a PNG with the same
+  code path as `sign --qr`), plus `--stop`/`--status` for a background server.
+- `fleet verify` / `verify`: a client-side check that the install actually joined
+  the mesh (lighthouse reachable, certificate chain, mesh DNS), printable for the
+  student to paste back.
+- `fleet ssh` for a *list* of nodes (loop, per-host result table) – today it is
+  one target per invocation.
+
+**Certificates & config**
+
+- `cert list --format json` (the CSV is already pipe-friendly; scripts would
+  prefer JSON) and `--relay`/`--expired` filters.
+- `profile create` – a class template: issue a cohort with the same groups,
+  subnets and relay in one command.
+- Node configs: an `--with-relay`-style “preview what the next bundle would ship”
+  (today `cert relay --dry-run` covers it for relay changes only).
+- Keep a per-node “why” note (e.g. “NATed lab router”) that `cert list` could
+  show next to the relay column.
+
+**Plumbing**
+
+- A docs test: every `docs/*.md` linked from the README map, every relative link
+  resolves (cheap `grep`/`test -f` loop in `run_tests.sh`).
+- Make the single-file build embed `VERSION` and the module list from one place
+  (today `MODULES` is duplicated in `build_single.sh` and `nebula-manager`).
+- `test_relay.sh` covers the CLI paths; a small fixture-based test for
+  `relay_apply_to_config` against the **real** Nebula binary would catch future
+  YAML shape regressions (skipped when `nebula` is absent).
+
+---
+
 ## Where to next?
 
 - **Motivation & history** → [motivation.md](motivation.md)

@@ -80,12 +80,12 @@ assert_eq "CLI PKI needed no sudo" "$(sudo_count)" "0"
 
 out="$("$NM" --cert-dir "$d" cert list 2>/dev/null)"
 assert_contains "cert list shows node1" "$out" "node1"
-assert_contains "cert list header is CSV" "$out" "name,type,ips,groups,subnets,from,to"
+assert_contains "cert list header is CSV" "$out" "name,type,ips,groups,subnets,relay,from,to"
 row="$(printf '%s\n' "$out" | awk -F, '$1=="node1"{print; exit}')"
-if [[ "$row" =~ ^node1,Cert,10\.7\.7\.7/24,servers,None,[0-9]{6},[0-9]{6}$ ]]; then
-    _ok "cert list row is YYMMDD CSV without fingerprint"
+if [[ "$row" =~ ^node1,Cert,10\.7\.7\.7/24,servers,None,no,[0-9]{6},[0-9]{6}$ ]]; then
+    _ok "cert list row is YYMMDD CSV without fingerprint (relay column: no)"
 else
-    _bad "cert list row is YYMMDD CSV without fingerprint" "got [$row]"
+    _bad "cert list row is YYMMDD CSV without fingerprint (relay column: no)" "got [$row]"
 fi
 assert_not_contains "cert list omits the fingerprint column" "$out" "fingerprint"
 assert_eq "short date helper: YYMMDD" "$(_cert_short_date '2026-09-29T10:16:10+02:00')" "260929"

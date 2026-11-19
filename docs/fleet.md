@@ -173,7 +173,7 @@ sudo bash install.sh
 ```
 
 On Windows: `Expand-Archive` the archive and run `install.ps1` in PowerShell
-(see [windows.md](windows.md)).
+(see [bundles.md](bundles.md#self-contained-installers)).
 
 ## Step 2c - push a change to a node you already run (SSH)
 

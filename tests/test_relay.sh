@@ -78,6 +78,12 @@ assert_contains "show marks the keyless cert" "$out" "no local key"
 assert_contains "show reports the relay setting" "$out" "use_relays: on, relays: 10.91.0.1"
 assert_contains "show reports an unset certificate" "$out" "not set (no relay: block)"
 
+# The same state in one line per certificate (`cert list`).
+out="$(list_certs 2>&1)"
+assert_contains "cert list has a relay column" "$out" "groups,subnets,relay,from,to"
+assert_contains "cert list shows the relay setting" "$out" "alice.mesh,Cert,10.91.0.2/16,students,None,use:10.91.0.1,"
+assert_contains "cert list shows an unset certificate" "$out" "lh.mesh,Cert,10.91.0.1/16,infra,None,no,"
+
 # --- 3) an address that is not a certificate is refused ---------------------
 out="$(relay_batch_cli --cert-dir "$keys" --select cert:alice.mesh \
     --relay 10.91.9.9 --yes 2>&1)"; rc=$?

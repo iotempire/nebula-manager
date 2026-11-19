@@ -188,6 +188,7 @@ Every menu action has a headless equivalent:
 | **[Motivation & history](docs/motivation.md)** | why the academic edition exists, design principles, credits |
 | **[User stories](docs/user-stories.md)** | `theprof` and the students — the workflows the tool is built around |
 | **[Linux distribution guides](docs/linux-distros.md)** | Ubuntu/Debian/Mint, Fedora/RHEL, Arch/CachyOS, host firewalls, yq v4 |
+| **[Architecture decisions](docs/decisions.md)** | the living ADR log: why the fork is shaped this way, the academic constraints, rejected alternatives |
 | **[Roadmap & TODO](docs/roadmap.md)** | implemented features, open work, manual platform confirmation |
 
 ---
@@ -329,6 +330,10 @@ fleet helpers, DNS and the store history. See
 Pull requests are welcome. For major changes, please open an issue first to
 discuss the change. Before sending a patch, run `make lint` and `./run_tests.sh`;
 see [Development](docs/development.md) for the test harness and checksum rules.
+
+Working with an AI assistant? Point it at **[AGENT.md](AGENT.md)** (module map,
+ground rules, test workflow, known pitfalls) and
+**[docs/decisions.md](docs/decisions.md)** (the ADRs it must not silently break).
 
 ---
 

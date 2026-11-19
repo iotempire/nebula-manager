@@ -320,6 +320,25 @@ relay_check_config() {
     return 0
 }
 
+# relay_list_cell <name> ; compact form for `cert list` (no spaces, no commas).
+#   no | off | use:IP[;IP] | am | am+use:IP
+relay_list_cell() {
+    local name="$1" saved mode relays
+    saved="$(node_relay_get "$name" 2>/dev/null || true)"
+    if [[ -z "$saved" ]]; then
+        printf 'no'
+        return 0
+    fi
+    IFS=$'\t' read -r mode relays <<<"$saved"
+    case "$mode" in
+        off)    printf 'off' ;;
+        am)     printf 'am' ;;
+        use)    printf 'use:%s' "${relays//, /;}" ;;
+        am+use) printf 'am+use:%s' "${relays//, /;}" ;;
+        *)      printf '?' ;;
+    esac
+}
+
 # relay_show_cert <name> ; one line describing the stored per-node setting.
 relay_show_cert() {
     local name="$1" saved mode relays

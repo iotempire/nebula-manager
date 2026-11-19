@@ -1045,7 +1045,7 @@ list_certs() {
     local cert
     for cert in "$certs_dir"/*.crt; do
         [[ -f "$cert" ]] || continue
-        local json n t i g s nb na
+        local json n t i g s nb na rl
         json=$(nebula_cert_json "$bin_path" "$cert")
         n=$(jq -r '.details.name' <<<"$json")
         t=$(jq -r '.details.isCa' <<<"$json"); t=$([[ $t == true ]] && echo "CA" || echo "Cert")
@@ -1054,21 +1054,31 @@ list_certs() {
         s=$(jq -r '.details.subnets | if length==0 then "None" else join(", ") end' <<<"$json")
         nb=$(jq -r '.details.notBefore' <<<"$json")
         na=$(jq -r '.details.notAfter' <<<"$json")
-        rows+=("$n|$t|$i|$g|$s|$(_cert_short_date "$nb")|$(_cert_short_date "$na")")
+        # Relay state comes from the per-node setting (a CA has none).
+        if [[ "$t" == "CA" ]]; then
+            rl="-"
+        elif declare -F relay_list_cell >/dev/null; then
+            rl="$(relay_list_cell "$n")"
+        else
+            rl="unknown"
+        fi
+        rows+=("$n|$t|$i|$g|$s|$rl|$(_cert_short_date "$nb")|$(_cert_short_date "$na")")
     done
 
     [[ ${#rows[@]} -eq 0 ]] && { log_warn "No certificates found in $certs_dir."; return; }
     local sorted
-    IFS=$'\n' sorted=($(printf "%s\n" "${rows[@]}" | sort -t "|" -k6))
+    IFS=$'\n' sorted=($(printf "%s\n" "${rows[@]}" | sort -t "|" -k7))
 
     # Plain CSV (no colours, no truncation): easy to read, copy or pipe.
-    printf '%s,%s,%s,%s,%s,%s,%s\n' name type ips groups subnets from to
-    local row n t i g s nb na
+    # relay: no | off | use:IP[;IP] | am | am+use:IP (see docs/relay.md).
+    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' name type ips groups subnets relay from to
+    local row n t i g s rl nb na
     for row in "${sorted[@]}"; do
-        IFS="|" read -r n t i g s nb na <<< "$row"
-        printf '%s,%s,%s,%s,%s,%s,%s\n' \
+        IFS="|" read -r n t i g s rl nb na <<< "$row"
+        printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
             "$(_csv_field "$n")" "$(_csv_field "$t")" "$(_csv_field "$i")" \
-            "$(_csv_field "$g")" "$(_csv_field "$s")" "$(_csv_field "$nb")" "$(_csv_field "$na")"
+            "$(_csv_field "$g")" "$(_csv_field "$s")" "$(_csv_field "$rl")" \
+            "$(_csv_field "$nb")" "$(_csv_field "$na")"
     done
 }
 
