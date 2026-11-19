@@ -71,9 +71,11 @@ assert_contains "summary reports the update" "$out" "Firewall updated for 3 cert
 
 for n in a1 a2 b1; do
     cfg="$keys/$n.mesh.yml"
-    assert_eq "$n: inbound has exactly one rule" "$(yq -r '.firewall.inbound | length' "$cfg")" "1"
+    assert_eq "$n: inbound has the group rule + ICMP" "$(yq -r '.firewall.inbound | length' "$cfg")" "2"
     assert_eq "$n: inbound allows group ulno" "$(yq -r '.firewall.inbound[0].group' "$cfg")" "ulno"
     assert_eq "$n: inbound port is any" "$(yq -r '.firewall.inbound[0].port' "$cfg")" "any"
+    assert_eq "$n: inbound allows ICMP from anyone" "$(yq -r '.firewall.inbound[1].proto' "$cfg")" "icmp"
+    assert_eq "$n: ICMP is not group-bound" "$(yq -r '.firewall.inbound[1].host' "$cfg")" "any"
     assert_eq "$n: outbound allows all hosts" "$(yq -r '.firewall.outbound[0].host' "$cfg")" "any"
 done
 assert_eq "lighthouse config is byte-identical" "$(sha "$keys/vps.mesh.yml")" "$vps_before"
@@ -136,17 +138,44 @@ assert_eq "refused run left the config alone" "$(sha "$keys/a1.mesh.yml")" "$a1_
 "$NM" --cert-dir "$keys" cert firewall --from-group ulno,lighthouse \
     --select cert:a2.mesh --include-lighthouse --yes >/dev/null 2>&1
 cfg="$keys/a2.mesh.yml"
-assert_eq "multi-group: inbound has exactly two rules" \
-    "$(yq -r '.firewall.inbound | length' "$cfg")" "2"
+assert_eq "multi-group: inbound has one rule per group + ICMP" \
+    "$(yq -r '.firewall.inbound | length' "$cfg")" "3"
 assert_eq "multi-group: first rule allows ulno" \
     "$(yq -r '.firewall.inbound[0].group' "$cfg")" "ulno"
 assert_eq "multi-group: second rule allows lighthouse" \
     "$(yq -r '.firewall.inbound[1].group' "$cfg")" "lighthouse"
+assert_eq "multi-group: third rule is ICMP" \
+    "$(yq -r '.firewall.inbound[2].proto' "$cfg")" "icmp"
 assert_eq "multi-group: no AND groups list is emitted" \
     "$(yq -r '.firewall.inbound[0].groups' "$cfg")" "null"
 mpack="$XDG_CONFIG_HOME/nebula-manager/policies/group-ulno-lighthouse.yml"
 assert_file "multi-group policy pack created" "$mpack"
 
+# --- ICMP for diagnostics, and the --no-icmp opt-out ------------------------
+out="$("$NM" --cert-dir "$keys" cert firewall --from-group students \
+    --select cert:b1.mesh --yes 2>&1)"
+assert_eq "group policy for another group exits 0" "$?" "0"
+assert_contains "the preview mentions ICMP" "$out" "(+ ICMP)"
+cfg="$keys/b1.mesh.yml"
+assert_eq "the ICMP rule is present" "$(yq -r '.firewall.inbound[1].proto' "$cfg")" "icmp"
+assert_eq "the ICMP rule is not group-bound" "$(yq -r '.firewall.inbound[1].host' "$cfg")" "any"
+
+out="$("$NM" --cert-dir "$keys" cert firewall --from-group students --no-icmp \
+    --select cert:b1.mesh --yes 2>&1)"
+assert_eq "--no-icmp exits 0" "$?" "0"
+assert_eq "--no-icmp leaves only the group rule" \
+    "$(yq -r '.firewall.inbound | length' "$cfg")" "1"
+assert_eq "--no-icmp keeps the group rule" "$(yq -r '.firewall.inbound[0].group' "$cfg")" "students"
+npack="$XDG_CONFIG_HOME/nebula-manager/policies/group-students.yml"
+assert_file "the generated pack still exists" "$npack"
+assert_eq "the pack was regenerated without ICMP" \
+    "$(yq -r '.firewall.inbound | length' "$npack")" "1"
+assert_contains "the pack documents the opt-out" "$(cat "$npack")" "ICMP inbound is NOT allowed"
+
+out="$("$NM" --cert-dir "$keys" cert firewall --no-icmp --firewall default \
+    --select cert:b1.mesh --yes 2>&1)"; rc=$?
+assert_eq "--no-icmp is refused for other choices" "$rc" "2"
+assert_contains "the refusal explains the flag" "$out" "only applies to --from-group"
 assert_eq "no sudo used anywhere" "$(sudo_count)" "0"
 
 harness_summary

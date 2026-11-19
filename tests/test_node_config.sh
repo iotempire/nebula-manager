@@ -152,7 +152,7 @@ node_fw_choose_tui() { return 0; }   # keep the fixture from driving that menu
 printf 'auto.mesh\nn\n10.100.0.20/24\nlab\nn\n\n' | generate_nebula_cert >/dev/null 2>&1
 assert_file "signing a node writes its config" "$keys/auto.mesh.yml"
 auto_cfg="$(cat "$keys/auto.mesh.yml")"
-assert_contains "the saved firewall choice is embedded" "$auto_cfg" "firewall: {}"
+assert_contains "the saved firewall choice is embedded" "$auto_cfg" "proto: icmp"
 
 # --- CLI --------------------------------------------------------------------
 NM="$REPO_ROOT/nebula-manager"

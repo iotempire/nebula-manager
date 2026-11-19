@@ -54,7 +54,9 @@ assert_contains "permissive allows inbound"  "$(cat "$p")" "inbound_action: drop
 assert_contains "permissive allows outbound" "$(cat "$p")" "outbound_action: drop"
 rm -f "$p"
 p="$(node_fw_render_policy default)"
-assert_contains "default is an empty firewall block" "$(cat "$p")" "firewall: {}"
+assert_contains "default keeps the inbound drop" "$(cat "$p")" "firewall:"
+assert_contains "default allows ICMP for diagnostics" "$(cat "$p")" "proto: icmp"
+assert_contains "default allows outbound" "$(cat "$p")" "outbound:"
 rm -f "$p"
 
 # The rendered profile is what the generated client template embeds.

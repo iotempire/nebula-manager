@@ -147,6 +147,15 @@ test immediately, which also let every student reach the teacher's home hosts.
 absent). The migration from “permissive” to “selective” is documented as a
 story (`docs/user-stories.md`).
 
+**ICMP is part of the generated policy.** A literal default-deny makes a broken
+tunnel indistinguishable from a dropped packet: the first debugging step is
+`ping`, so every policy this tool generates (`--from-group`, and the `default`
+mode) carries an explicit `proto: icmp` / `host: any` inbound rule.
+`cert firewall --from-group … --no-icmp` opts out; a hand-written pack is the
+fully custom route. This also means the auto-generated `group-*` packs are
+re-rendered when the renderer changes (they are marked auto-generated), instead
+of pinning the semantics of the release that first created them.
+
 **Consequences.** A new config without rules blocks everything — the bundle
 README and the stories say so, and the permissive mode stays available as a
 one-command rollback.

@@ -596,6 +596,8 @@ firewall:
     - port: any
       proto: any
       group: "home"
+    - proto: icmp
+      host: any      # ping stays possible for diagnostics
   outbound:
     - port: any
       proto: any

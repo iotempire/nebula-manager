@@ -2154,7 +2154,7 @@ pki_firewall_apply_selected() {
 # Headless: nebula-manager cert firewall --from-group instructor [--select ...]
 pki_firewall_cli() {
     local cert_dir="" mode="" policy_ref="" group_csv="" policy="" pack="" desc="" tmp=""
-    local dry=0 yes=0 include_lh=0
+    local dry=0 yes=0 include_lh=0 icmp=1
     local -a selects=() excludes=()
     while (( $# )); do
         case "$1" in
@@ -2172,6 +2172,8 @@ pki_firewall_cli() {
             --from-group|--group) shift; group_csv="${1:-}" ;;
             --from-group=*) group_csv="${1#*=}" ;;
             --include-lighthouse|--with-lighthouse) include_lh=1 ;;
+            --no-icmp)   icmp=0 ;;
+            --icmp)      icmp=1 ;;
             --dry-run|-n) dry=1 ;;
             --yes|-y)     yes=1 ;;
             -h|--help)
@@ -2186,6 +2188,9 @@ Firewall choice (pick one):
   --policy NAME         embed an existing policy pack
   --firewall MODE       host | permissive | default | skip | pack:NAME
 
+Generated policies always allow ICMP from any peer (ping stays possible for
+diagnostics). With --from-group, --no-icmp removes that rule.
+
 Selection (default: all certificates):
   --select SPEC         group:G, without:G, name:GLOB, ip:CIDR, cert:NAME, all
   --exclude SPEC        subtract from the selection
@@ -2193,12 +2198,14 @@ Selection (default: all certificates):
 Options:
   --cert-dir DIR        Certificate workspace
   --include-lighthouse  also change certificates in the lighthouse role
+  --no-icmp             no ICMP allow rule (only with --from-group)
   --dry-run, -n         show what would change; write nothing
   --yes, -y             do not ask (required when stdin is not a TTY)
 
 Example:
   nebula-manager cert firewall --from-group instructor --select all --yes
     # every node except the lighthouse accepts inbound only from that group
+    # (+ ICMP from anyone, so ping diagnostics keep working)
 EOF
                 return 0 ;;
             -*) log_error "Unknown option for 'cert firewall': $1"; return 2 ;;
@@ -2216,6 +2223,11 @@ EOF
         log_error "Choose exactly one of --from-group, --policy or --firewall (see --help)."
         return 2
     fi
+    if (( ! icmp )) && [[ -z "$group_csv" ]]; then
+        log_error "--no-icmp only applies to --from-group: the other choices are stored by name."
+        log_info "For a policy without ICMP, write a policy pack and use --policy NAME."
+        return 2
+    fi
 
     if [[ -n "$group_csv" ]]; then
         if declare -F _pki_groups_validate_list >/dev/null && ! _pki_groups_validate_list "$group_csv"; then
@@ -2223,11 +2235,15 @@ EOF
             return 2
         fi
         local pack_path
-        pack_path="$(node_fw_group_policy_pack "$group_csv")" || return 1
+        pack_path="$(node_fw_group_policy_pack "$group_csv" "$icmp")" || return 1
         policy="$pack_path"
         pack="$(basename "$policy" .yml)"
         mode="pack"
-        desc="inbound only from group(s) ${group_csv}"
+        if (( icmp )); then
+            desc="inbound only from group(s) ${group_csv} (+ ICMP)"
+        else
+            desc="inbound only from group(s) ${group_csv}"
+        fi
     elif [[ -n "$policy_ref" ]]; then
         policy="$(policy_resolve "$policy_ref")" || return 1
         pack="$(basename "$policy" .yml)"
@@ -2238,7 +2254,7 @@ EOF
             host)       desc="copy this host's firewall (detected)" ;;
             skip)       desc="forget the saved choice (detected firewall in the config)" ;;
             permissive) desc="permissive: allow all inbound/outbound" ;;
-            default)    desc="Nebula defaults: outbound allow, inbound drop" ;;
+            default)    desc="Nebula defaults + ICMP: outbound allow, inbound drop" ;;
             pack:*)
                 pack="${mode#pack:}"
                 policy="$(policy_resolve "$pack")" || return 1
@@ -2306,8 +2322,8 @@ pki_firewall_batch_tui() {
 
     local -a pairs=( host "Copy this host's firewall (detected)"
                      permissive "Permissive: allow all inbound/outbound"
-                     default "Nebula defaults: outbound allow, inbound drop"
-                     group "Inbound only from a group (e.g. instructor)"
+                     default "Nebula defaults + ICMP: outbound allow, inbound drop"
+                     group "Inbound only from a group (+ ICMP for diagnostics)"
                      skip "Forget the saved choice (detected firewall)" )
     if declare -F policy_pairs >/dev/null && policy_pairs; then
         local i

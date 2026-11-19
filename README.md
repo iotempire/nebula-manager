@@ -157,7 +157,7 @@ Every menu action has a headless equivalent:
 | **Certificates** | CA creation, signing (including mobile `--in-pub`/QR), group editing, re-sign all after a CA rotation, expiry, revoke, user-owned workspaces → [certificates.md](docs/certificates.md) |
 | **Node configs** | `<name>.yml` next to the cert/key, generated at signing time, editable, reused by bundles → [certificates.md](docs/certificates.md#per-node-client-configs-nameyml-next-to-the-certificate) |
 | **Bundles** | cert/key/CA + config, Linux/macOS `install.sh`, Windows `install.ps1`, config diffs, cert-only refresh, HTTP/croc one-liners → [bundles.md](docs/bundles.md) |
-| **Firewall** | this host's rules with a group picker, policy packs, batch node firewalls (lighthouse-safe) → [firewall.md](docs/firewall.md) |
+| **Firewall** | this host's rules with a group picker, policy packs, batch node firewalls (lighthouse-safe, ICMP for diagnostics on by default) → [firewall.md](docs/firewall.md) |
 | **Relay** | `relay:` block per node (`cert relay`), on signing (`sign --relay`), pushed over SSH, or on this host (`relay local`) → [relay.md](docs/relay.md) |
 | **Configuration** | validate/edit the Nebula `config.yml` on a working copy, service restart, policy packs, name resolution → [usage.md](docs/usage.md), [dns.md](docs/dns.md) |
 | **Fleet** | `fleet bundle` → `fleet serve` (HTTP + copyparty password) for a class, `fleet croc` one receiver at a time, `fleet ssh` with diff/backup/validate/restart → [fleet.md](docs/fleet.md) |

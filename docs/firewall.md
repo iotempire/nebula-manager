@@ -109,19 +109,34 @@ firewall:
     # - port: any
     #   proto: any
     #   group: "admin"
+    # ICMP for diagnostics: any peer in the mesh may ping this node. Added to
+    # every generated restrictive policy; `--no-icmp` leaves it out.
+    # (No `port:` here - Nebula ignores it for ICMP and logs a warning.)
+    - proto: icmp
+      host: any
   outbound:
     - port: any
       proto: any
       host: any
 ```
 
-`--from-group home,admin` therefore produces two inbound rules (OR semantics).
+`--from-group home,admin` therefore produces two inbound rules (OR semantics),
+plus the ICMP rule.
+
+**ICMP is on by default.** A mesh you cannot ping is a mesh you cannot debug, so
+every generated restrictive policy (`--from-group`, and the `default` mode) keeps
+an `icmp` rule for any peer. The `permissive` mode allows everything anyway. To
+remove it for a specific deployment, either
+`cert firewall --from-group ... --no-icmp` (the prompt then shows the change
+without the `(+ ICMP)` marker) or use a policy pack you wrote yourself.
 
 `--from-group` also creates (or reuses) a policy pack named `group-home` under
 `~/.config/nebula-manager/policies/`, and remembers it per certificate, so
-bundles and later regenerations keep the same policy. Existing hand edits are
-snapshotted (git or `backups/`) before `--force` regeneration. Use
-`--select`/`--exclude` (same grammar as group batch) to narrow the target set.
+bundles and later regenerations keep the same policy. The pack is
+**auto-generated** (its header says so): a newer renderer — e.g. the ICMP rule —
+converges the next time the same `--from-group` runs, and the pack is rewritten
+only when its content actually changes. Use `--select`/`--exclude` (same grammar
+as group batch) to narrow the target set.
 
 ### Policy packs (fleet)
 
