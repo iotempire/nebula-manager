@@ -321,6 +321,12 @@ diagnostics_view() {
         echo -e "    ${YELLOW}note: $configured_config is not readable (service-owned); using defaults.${RESET}"
     fi
 
+    # 2b) Relay state (use_relays / am_relay / relays) and address sanity.
+    if [[ -n "$cfg_file" ]] && declare -F relay_config_line >/dev/null; then
+        echo -e "${BOLD}${YELLOW}Relay:${RESET} $(relay_config_line "$cfg_file")"
+        relay_check_config "$cfg_file" "$certs_dir" || true
+    fi
+
     # 3) Certificate expiration
     echo -e "${BOLD}${YELLOW}Certificate expiration:${RESET}"
     local -a candidates=()

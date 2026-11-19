@@ -65,8 +65,9 @@ MOCK
     # Never inherit developer toggles that change output.
     unset DEBUG NEBULA_CLEAR_SCREEN 2>/dev/null || true
     # Keep tests deterministic: never auto-read the host's Nebula config (an
-    # explicit NEBULA_LOCAL_CONFIG is still honoured).
-    export NEBULA_NO_LOCAL_CONFIG=1
+    # explicit NEBULA_LOCAL_CONFIG is still honoured), and never stop on a
+    # "may I read it with sudo?" prompt even when the harness runs on a tty.
+    export NEBULA_NO_LOCAL_CONFIG=1 NEBULA_NO_PROMPT=1
 
     # Point NEBULA_BIN_PATH at a real nebula-cert if we can find one.
     local cert_bin
@@ -90,6 +91,8 @@ MOCK
     source "$REPO_ROOT/lib/import.sh"
     # shellcheck source=/dev/null
     source "$REPO_ROOT/lib/policy.sh"
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/lib/relay.sh"
     # shellcheck source=/dev/null
     source "$REPO_ROOT/lib/store.sh"
     # shellcheck source=/dev/null

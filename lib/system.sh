@@ -2339,6 +2339,10 @@ firewall_explain() {
     printf 'Nebula firewall: %s\n' "$config"
     printf 'Inbound default:  %s\n' "$(yq -r '.firewall.inbound_action  // "drop"'   "$readable")"
     printf 'Outbound default: %s\n' "$(yq -r '.firewall.outbound_action // "drop"' "$readable")"
+    if declare -F relay_config_line >/dev/null; then
+        printf 'Relay:            %s\n' "$(relay_config_line "$readable")"
+        relay_check_config "$readable" || true
+    fi
     _firewall_explain_direction "$readable" inbound
     _firewall_explain_direction "$readable" outbound
 
@@ -3079,8 +3083,8 @@ dns_cli() {
 
 manage_configuration() {
     dynamic_menu_title=("$MENU_PATH" "Instance Settings")
-    dynamic_menu_options=("$(get_icon 'validate')Validate Config" "$(get_icon 'configuration')Edit Config" "$(get_icon 'firewall')Edit Firewall" "$(get_icon 'connectivity')Name resolution (Nebula DNS)")
-    dynamic_menu_functions=("check_nebula_config \"$NEBULA_DIR/config.yml\" \"error\"" "edit_nebula_config" "manage_firewall" "manage_name_resolution")
+    dynamic_menu_options=("$(get_icon 'validate')Validate Config" "$(get_icon 'configuration')Edit Config" "$(get_icon 'firewall')Edit Firewall" "$(get_icon 'connectivity')Local relay (am_relay)" "$(get_icon 'connectivity')Name resolution (Nebula DNS)")
+    dynamic_menu_functions=("check_nebula_config \"$NEBULA_DIR/config.yml\" \"error\"" "edit_nebula_config" "manage_firewall" "relay_local_tui" "manage_name_resolution")
     dynamic_menu dynamic_menu_title dynamic_menu_options dynamic_menu_functions 1 instance_context_refresh \
-        "This instance's config.yml: validate, edit, firewall rules (in/out), Nebula DNS."
+        "This instance's config.yml: validate, edit, firewall rules (in/out), relay settings, Nebula DNS."
 }

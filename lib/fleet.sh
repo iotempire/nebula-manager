@@ -861,6 +861,8 @@ Change the remote config:
   --policy PACK          merge a firewall policy pack into the remote config
   --firewall MODE        host | permissive | default | pack:NAME | skip
   --firewall-file FILE   merge a local firewall file (bare firewall: or a pack)
+  --relay IP[,IP]        set relay.use_relays + the relay list (repeatable)
+  --no-relay             remove the remote relay: block
   --config FILE          push this complete config.yml instead of merging
   --remote-config PATH   Remote config path (default: /etc/nebula/config.yml)
 
@@ -893,6 +895,7 @@ fleet_ssh_cli() {
 _fleet_ssh_cli_body() {
     local target="" port=22 policy="" fw_mode="" fw_file="" config_file="" remote_cfg="/etc/nebula/config.yml"
     local service="nebula.service" assume_yes=0 dry=0 no_restart=0 cert_dir=""
+    local relay_csv="" relay_off=0
     FLEET_SSH_TMP=()
     local -a extra_hosts=() extra_users=() extra_domains=()
     while (( $# )); do
@@ -913,6 +916,9 @@ _fleet_ssh_cli_body() {
             --firewall-file=*) fw_file="${1#*=}" ;;
             --config)        shift; config_file="${1:-}" ;;
             --config=*)      config_file="${1#*=}" ;;
+            --relay)         shift; relay_csv="${relay_csv:+$relay_csv,}${1:-}" ;;
+            --relay=*)       relay_csv="${relay_csv:+$relay_csv,}${1#*=}" ;;
+            --no-relay)      relay_off=1 ;;
             --remote-config) shift; remote_cfg="${1:-}" ;;
             --remote-config=*) remote_cfg="${1#*=}" ;;
             --service)       shift; service="${1:-}" ;;
@@ -934,12 +940,16 @@ _fleet_ssh_cli_body() {
 
     local pack_path="" fw_tmp=""
 
-    if [[ -z "$config_file" && -z "$policy" && -z "$fw_mode" && -z "$fw_file" ]]; then
-        log_error "Nothing to change: pass --policy PACK, --firewall MODE, --firewall-file FILE or --config FILE."
+    if [[ -z "$config_file" && -z "$policy" && -z "$fw_mode" && -z "$fw_file" \
+            && -z "$relay_csv" && "$relay_off" == 0 ]]; then
+        log_error "Nothing to change: pass --policy PACK, --firewall MODE, --firewall-file FILE, --relay IP, --no-relay or --config FILE."
         return 2
     fi
-    if [[ -n "$config_file" && ( -n "$policy" || -n "$fw_mode" || -n "$fw_file" ) ]]; then
-        log_warn "--config replaces the whole file; ignoring the policy/firewall merge."
+    if [[ "$relay_csv" != "" && "$relay_off" == 1 ]]; then
+        log_error "Use either --relay or --no-relay, not both."; return 2
+    fi
+    if [[ -n "$config_file" && ( -n "$policy" || -n "$fw_mode" || -n "$fw_file" || -n "$relay_csv" || "$relay_off" == 1 ) ]]; then
+        log_warn "--config replaces the whole file; ignoring the policy/firewall/relay merge."
     fi
     if [[ -n "$fw_file" && ( -n "$policy" || -n "$fw_mode" ) ]]; then
         log_error "Use either --firewall-file or --policy/--firewall, not both."; return 2
@@ -961,6 +971,32 @@ _fleet_ssh_cli_body() {
     fi
     if [[ -n "$config_file" && ! -f "$config_file" ]]; then
         log_error "Config file not found: $config_file"; return 1
+    fi
+
+    # Validate relay addresses before touching the remote host (the workspace
+    # check is only a warning: the peer may belong to a different store).
+    if [[ -n "$relay_csv" ]]; then
+        local -a rraw=() rlist=()
+        local rr
+        IFS=',' read -ra rraw <<<"$relay_csv"
+        for rr in "${rraw[@]}"; do
+            rr="$(relay_normalize "$rr")"
+            [[ -n "$rr" ]] || continue
+            if ! relay_valid_ip "$rr"; then
+                log_error "Not an IP address: '$rr' (--relay takes relay overlay IPs)"
+                return 2
+            fi
+            rlist+=("$rr")
+        done
+        if (( ${#rlist[@]} == 0 )); then
+            log_error "--relay needs at least one address."; return 2
+        fi
+        relay_csv="$(IFS=','; printf '%s' "${rlist[*]}")"
+        for rr in "${rlist[@]}"; do
+            if [[ -z "$(relay_owner "$rr" "${cert_dir:-$(resolve_cert_dir)}" || true)" ]]; then
+                log_warn "Relay $rr is not a certificate in the local workspace; pushing it anyway."
+            fi
+        done
     fi
 
     local -a probe_args=(--port "$port")
@@ -1005,6 +1041,11 @@ _fleet_ssh_cli_body() {
         cp "$oldcfg" "$newcfg"
         if [[ -n "$pack_path" ]]; then
             policy_apply_to_config "$newcfg" "$pack_path" || return 1
+        fi
+        if [[ "$relay_off" == 1 ]]; then
+            relay_apply_to_config "$newcfg" off || return 1
+        elif [[ -n "$relay_csv" ]]; then
+            relay_apply_to_config "$newcfg" use "$relay_csv" || return 1
         fi
     fi
 
@@ -1216,12 +1257,18 @@ fleet_ssh_tui() {
             popts+=( "${POLICY_PAIRS[i]}" "Policy pack: ${POLICY_PAIRS[i+1]}" )
         done
     fi
+    popts+=( __relay__ "Set relay settings (use_relays + relays)" )
     popts+=( __file__ "Push a complete config.yml file" )
     local choice
     choice="$(ui_menu "Fleet SSH" "What should be applied on $target?" "${popts[@]}")" || return 0
     local -a args=( "$target" )
     case "$choice" in
         __none__) log_info "Canceled."; return 0 ;;
+        __relay__)
+            local addr
+            addr="$(ui_input "Fleet SSH" "Relay IP(s), comma-separated (a certificate in your workspace):")" || return 0
+            [[ -n "$addr" ]] || return 0
+            args+=( --relay "$addr" ) ;;
         __file__)
             local f; f="$(ui_input "Fleet SSH" "Local config.yml to push:")" || return 0
             [[ -z "$f" ]] && return 0

@@ -35,6 +35,13 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       applied locally, or exported per host for an existing fleet.
 - [x] **Batch node firewalls** – `cert firewall --from-group …` rewrites the
       stored per-node configs (lighthouse-safe, auto policy pack, remembered).
+- [x] **Relays** – `relay:` block support end to end: stored per-node setting
+      (`cert relay --relay/--no-relay/--am-relay/--show`, `--rebundle`), emitted
+      by node-config rendering and bundles, `sign --relay`, `fleet ssh
+      --relay/--no-relay`, `relay local --am-relay/--show` on this host
+      (backup + `nebula -test` + restart + auto-restore), relay state in `diag`
+      and `firewall explain` with unknown/expired-address warnings →
+      [relay.md](relay.md).
 - [ ] **Firewall editor multi-group semantics** – the per-host rule editor still
       writes `groups: [a,b]` when several groups are picked. Nebula AND-s that
       list, so “allow from any of these groups” must emit one `group:` rule per

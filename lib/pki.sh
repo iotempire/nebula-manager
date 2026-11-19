@@ -1794,6 +1794,13 @@ pki_write_client_config() {
 
         printf '\ntun:\n  dev: %s\n' "$tun"
     } > "$outfile"
+
+    # Optional top-level relay: block. It is only emitted when a setting exists
+    # (saved by `cert relay` / `sign --relay`), so an untouched workspace keeps
+    # producing exactly the same config as before.
+    if declare -F relay_append_to_config >/dev/null; then
+        relay_append_to_config "$outfile" "$name"
+    fi
 }
 
 # --- per-node client configs -------------------------------------------------
@@ -2693,6 +2700,12 @@ pki_bundle_client_zip() {
             pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" || {
                 log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
         fi
+    fi
+
+    # A saved per-node relay setting wins over whatever the stored config says, so
+    # a bundle can never be made from a config that predates the setting.
+    if declare -F relay_sync_config >/dev/null; then
+        relay_sync_config "$tmp/config.yml.template" "$name"
     fi
 
     # Self-contained installers (Linux/macOS + Windows) and a client README.
@@ -3634,6 +3647,7 @@ manage_nebula_certs() {
         "$(get_icon 'edit')Rename Group in Certificates"
         "$(get_icon 'edit')Edit Groups (Batch)…"
         "$(get_icon 'security')Firewall for Nodes (Batch)…"
+        "$(get_icon 'connectivity')Relay for Nodes (Batch)…"
         "$(get_icon 'inspect')View Certificate and Key Details"
         "$(get_icon 'hour-glass')Certificate Expiry"
         "$(get_icon 'upload')Bundle / Export Client Certificate"
@@ -3651,6 +3665,7 @@ manage_nebula_certs() {
         "pki_rename_group_tui"
         "pki_group_edit_tui"
         "pki_firewall_batch_tui"
+        "relay_batch_tui"
         "view_cert_details"
         "list_certs_expiry"
         "pki_bundle_client_menu"
@@ -3966,6 +3981,9 @@ pki_cli() {
         firewall|fw)
             pki_firewall_cli "$@"
             ;;
+        relay|relays)
+            relay_batch_cli "$@"
+            ;;
         resign-all|renew-all|resignall|renumber)
             local rcert="" rdry=0 ryes=0 rkeep=0 rskip=0 rprefix=""
             while (( $# )); do
@@ -4044,7 +4062,7 @@ pki_ca_cli() {
 
 pki_sign_cli() {
     local name="" ip="" groups="" subnets="" duration="" cert_dir="" in_pub="" qr=""
-    local name_given=0
+    local name_given=0 relay_csv=""
     while (($#)); do
         case "$1" in
             --name|-n) shift; name="$1"; name_given=1 ;;
@@ -4055,16 +4073,18 @@ pki_sign_cli() {
             --cert-dir) shift; cert_dir="$1" ;;
             --in-pub) shift; in_pub="$1" ;;
             --qr|--out-qr) shift; qr="$1" ;;
+            --relay) shift; relay_csv="${relay_csv:+$relay_csv,}${1:-}" ;;
+            --relay=*) relay_csv="${relay_csv:+$relay_csv,}${1#*=}" ;;
             --) shift; break ;;
             -h|--help)
-                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--cert-dir DIR]\n'
+                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--relay IP]... [--cert-dir DIR]\n'
                 return 0 ;;
             -*)
                 # Never treat an unknown flag as a certificate name: a bare
                 # `sign --help` used to sign a certificate literally named
                 # "--help".
                 log_error "Unknown option for 'sign': $1"
-                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--cert-dir DIR]\n' >&2
+                printf 'Usage: nebula-manager sign [--name NAME] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--groups a,b] [--subnets CIDR] [--duration HOURS] [--relay IP]... [--cert-dir DIR]\n' >&2
                 return 2 ;;
             *)
                 if [[ -z "$name" ]]; then name="$1"; name_given=1
@@ -4108,8 +4128,45 @@ pki_sign_cli() {
     fi
     # strip a trailing 'h' from duration if the user supplied one
     duration="${duration%h}"
+
+    # A relay block on a brand-new certificate: validate the addresses against
+    # this workspace, keep them with the certificate, then let the normal node
+    # config rendering pick them up (no second pass needed).
+    local -a relay_list=()
+    if [[ -n "$relay_csv" ]]; then
+        local -a raw=() r
+        IFS=',' read -ra raw <<<"$relay_csv"
+        for r in "${raw[@]}"; do
+            r="$(relay_normalize "$r")"
+            [[ -n "$r" ]] || continue
+            if ! relay_valid_ip "$r"; then
+                log_error "Not an IP address: '$r' (--relay takes relay overlay IPs)"
+                return 2
+            fi
+            relay_require_known "$r" "$cert_dir" || return 1
+            relay_list+=("$r")
+        done
+        (( ${#relay_list[@]} )) || { log_error "--relay needs at least one address."; return 2; }
+    fi
+
     CERT_DIR="$cert_dir" SIGN_NAME="$name" SIGN_IP="$ip" \
         SIGN_GROUPS="$groups" SIGN_SUBNETS="$subnets" SIGN_DURATION_H="$duration" \
         SIGN_IN_PUB="$in_pub" SIGN_QR="$qr" \
         pki_sign
+    local rc=$?
+    (( rc == 0 )) || return $rc
+
+    if (( ${#relay_list[@]} )); then
+        local csv
+        csv="$(printf '%s,' "${relay_list[@]}")"; csv="${csv%,}"
+        node_relay_set "$name" use "$csv" \
+            || log_warn "Could not remember the relay setting for $name."
+        if [[ -z "$in_pub" ]] && declare -F pki_node_config_write_for_fw >/dev/null; then
+            pki_node_config_write_for_fw "$name" "$cert_dir" 1 >/dev/null \
+                || log_warn "Certificate signed, but its client config could not be written."
+        else
+            log_info "Device certificate: keeping the relay setting for later bundles (no local config)."
+        fi
+    fi
+    return 0
 }

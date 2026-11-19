@@ -140,6 +140,14 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager policy export --pack home --select group:home --out ./policies/
 ./nebula-manager policy apply --pack home --nebula-config /etc/nebula/config.yml
 
+# Relay                      (TUI: cert relay / Instance Settings > Local relay)
+./nebula-manager cert relay --select group:students --relay 10.100.0.1
+#   ^ writes relay: into every stored <name>.yml; --rebundle refreshes exports
+./nebula-manager cert relay --select all --show
+./nebula-manager cert relay --select name:router* --no-relay --dry-run
+./nebula-manager relay local --show
+./nebula-manager relay local --am-relay on
+
 # Fleet                      (TUI: Fleet)
 ./nebula-manager fleet bundle --select group:students --policy students
 #   ^ renders one self-contained bundle per node, transfers nothing

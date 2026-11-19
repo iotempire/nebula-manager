@@ -875,6 +875,7 @@ Certificates ▸ Re-sign All Certificates|renew resign all certificates new ca r
 Certificates ▸ Rename Group|rename group cert certificate|pki_rename_group_tui
 Certificates ▸ Edit Groups (Batch)|groups batch add remove move set rename certificates|pki_group_edit_tui
 Certificates ▸ Firewall for Nodes (Batch)|firewall batch group policy pack inbound allow nodes certificates|pki_firewall_batch_tui
+Certificates ▸ Relay for Nodes (Batch)|relay use_relays am_relay relays batch nodes certificates|relay_batch_tui
 Certificates ▸ View Certificate Details|view details inspect show cert certificate|view_cert_details
 Certificates ▸ Certificate Expiry|expiry expiration renew cert certificate|list_certs_expiry
 Certificates ▸ Bundle / Export Client|bundle export zip client certificate|pki_bundle_client_menu
@@ -894,10 +895,11 @@ Instances ▸ Add|add server instance|server_add_tui
 Instances ▸ Enable / Disable|enable disable server instance|server_toggle_tui
 Instances ▸ Service Start / Stop|start stop restart service systemd|toggle_nebula_service
 Instances ▸ Remove|remove delete server instance|server_remove_tui
-Instance Settings|config yaml settings validate edit firewall dns|manage_configuration
+Instance Settings|config yaml settings validate edit firewall dns relay|manage_configuration
 Instance Settings ▸ Validate Config|validate test check config|validate_config_tui
 Instance Settings ▸ Edit Config|edit config yaml settings|edit_nebula_config
 Instance Settings ▸ Edit Firewall|firewall rules inbound outbound ports groups|manage_firewall
+Instance Settings ▸ Local Relay|relay am_relay use_relays this host config|relay_local_tui
 Instance Settings ▸ Name Resolution|dns name resolution resolvectl|manage_name_resolution
 Connectivity|ping connectivity reachability nodes machines|check_node_connectivity
 Diagnostics|diag tun udp port expiry certificate|run_diagnostics_tui

@@ -157,6 +157,7 @@ Every menu action has a headless equivalent:
 | **Node configs** | `<name>.yml` next to the cert/key, generated at signing time, editable, reused by bundles → [certificates.md](docs/certificates.md#per-node-client-configs-nameyml-next-to-the-certificate) |
 | **Bundles** | cert/key/CA + config, Linux/macOS `install.sh`, Windows `install.ps1`, config diffs, cert-only refresh, HTTP/croc one-liners → [bundles.md](docs/bundles.md) |
 | **Firewall** | this host's rules with a group picker, policy packs, batch node firewalls (lighthouse-safe) → [firewall.md](docs/firewall.md) |
+| **Relay** | `relay:` block per node (`cert relay`), on signing (`sign --relay`), pushed over SSH, or on this host (`relay local`) → [relay.md](docs/relay.md) |
 | **Configuration** | validate/edit the Nebula `config.yml` on a working copy, service restart, policy packs, name resolution → [usage.md](docs/usage.md), [dns.md](docs/dns.md) |
 | **Fleet** | `fleet bundle` → `fleet serve` (HTTP + copyparty password) for a class, `fleet croc` one receiver at a time, `fleet ssh` with diff/backup/validate/restart → [fleet.md](docs/fleet.md) |
 | **DNS** | lighthouse `serve_dns`, client resolver setup, boot hook → [dns.md](docs/dns.md) |
@@ -177,6 +178,7 @@ Every menu action has a headless equivalent:
 | **[Certificates & workspaces](docs/certificates.md)** | signing, mobile certs, groups, re-signing, per-node configs, store history |
 | **[Client bundles & installers](docs/bundles.md)** | export, self-contained installers, sharing, importing on the client |
 | **[Firewall](docs/firewall.md)** | per-host rules, group semantics, policy packs, batch node firewall |
+| **[Relays](docs/relay.md)** | when a relay helps (NAT/CGNAT), the two `relay:` shapes, per-node and lighthouse commands, inspection |
 | **[Name resolution](docs/dns.md)** | lighthouse DNS, `resolvectl`, boot hook |
 | **[Fleet deployment](docs/fleet.md)** | croc mass sharing, SSH push, reachability probing |
 | **[Usage & CLI reference](docs/usage.md)** | interactive menus, every headless command, flags, env vars, debug modes |

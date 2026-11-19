@@ -89,7 +89,7 @@ resolve_lib_dir() {
 # sourcing lib/*.sh below. Keep the markers on their own lines.
 # >>> BUNDLE:MODULES >>>
 MANAGER_LIB_DIR="$(resolve_lib_dir)"
-for _mod in ui pki select bench system import policy store fleet; do
+for _mod in ui pki select bench system import policy relay store fleet; do
     if [[ -r "$MANAGER_LIB_DIR/$_mod.sh" ]]; then
         # shellcheck source=/dev/null
         source "$MANAGER_LIB_DIR/$_mod.sh"
@@ -365,10 +365,19 @@ Global options:
 Commands:
   (none)                          Interactive TUI (menu-driven)
   ca [create] --name NAME [...]   Create a certificate authority (unprivileged)
-  sign [--name N] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [...]
+  sign [--name N] [--ip CIDR] [--in-pub KEY.pub] [--qr OUT.png] [--relay IP]...
                                   Sign a client cert (name/IP auto-suggested;
-                                  --in-pub for mobile: the key stays on the device)
+                                  --in-pub for mobile: the key stays on the device;
+                                  --relay puts the relay block in its config)
   cert list|expiry|remove          Certificate operations
+  cert relay --select SPEC --relay IP[,IP]|--no-relay|--am-relay|--show
+                                  Set the Nebula relay: block in the stored
+                                  per-node configs (bundles follow); --rebundle
+                                  refreshes the exports in the same run
+  relay local [--show] [--am-relay on|off] [--relay IP] [--service NAME]
+                                  Show or change this host's relay settings
+                                  (backup, nebula -test, service restart;
+                                  --nebula-config FILE for a non-default config)
   cert store status|log|backup|git-init
                                   Certificate-store history: action log,
                                   datestamped backups or git snapshots
@@ -394,10 +403,12 @@ Commands:
                                   Share bundles with croc, one receiver at a
                                   time; croc prints the three-word code.
   fleet ssh TARGET [--policy PACK|--firewall MODE|--firewall-file FILE|
-                    --config FILE] [--yes] [--dry-run] [--no-restart]
-                                  Fetch a remote config, merge the firewall,
-                                  show a diff, upload with a backup, validate and
-                                  restart. Names expand via cert domains/NetBird.
+                    --relay IP|--no-relay|--config FILE] [--yes] [--dry-run]
+                    [--no-restart]
+                                  Fetch a remote config, merge the firewall or
+                                  relay block, show a diff, upload with a backup,
+                                  validate and restart. Names expand via cert
+                                  domains/NetBird.
   fleet probe TARGET [--port N] [--host H] [--user U]
                                   Test SSH reachability and find a login user.
   rename-group <old> <new>        Replace a group in every certificate that
@@ -529,6 +540,7 @@ main() {
         dns)            shift; dns_cli "$@" ;;
         firewall|fw)    shift; firewall_cli "$@" ;;
         policy|policies) shift; policy_cli "$@" ;;
+        relay|relays)   shift; relay_cli "$@" ;;
         config|conf)    shift; config_cli "$@" ;;
         fleet|fleets)   shift; fleet_cli "$@" ;;
         server|srv|instance|instances) shift; server_cli "$@" ;;

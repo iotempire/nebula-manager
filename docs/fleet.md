@@ -16,6 +16,12 @@ All three start from the same artifact: a **bundle** (`fleet bundle`) - the
 certificate, its private key, `ca.crt`, the rendered client config, `install.sh`,
 `install.ps1` and a `README.txt`.
 
+> **Relays.** If some of these nodes cannot reach each other directly (two peers
+> behind one NAT, CGNAT, no IPv6), add the `relay:` block before exporting:
+> `nebula-manager cert relay --select group:students --relay 10.100.0.1 --rebundle`,
+> and `nebula-manager relay local --am-relay on` on the lighthouse. Bundles then
+> carry it automatically. Details and the topology rule: [relay.md](relay.md).
+
 **TUI:** **Main Menu ▸ Fleet** shows the three steps in that order: *Prepare
 bundles*, *Serve bundles over HTTP*, *Share one bundle via croc*.
 

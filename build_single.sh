@@ -20,7 +20,7 @@ OUT="${1:-$REPO_ROOT/dist/nebula-manager}"
 OUT_DIR="$(dirname "$OUT")"
 ENTRY="$REPO_ROOT/nebula-manager"
 
-MODULES=(ui pki select bench system import policy store fleet)
+MODULES=(ui pki select bench system import policy relay store fleet)
 ASSETS=(nebula-manager.conf.template bundle/install.sh bundle/install.ps1 bundle/README.txt)
 
 START_MARK='# >>> BUNDLE:MODULES >>>'
