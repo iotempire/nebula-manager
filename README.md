@@ -142,6 +142,7 @@ Every menu action has a headless equivalent:
 | Allow inbound only from a group | `nebula-manager cert firewall --from-group home --select all --yes` |
 | Export a client bundle | `nebula-manager cert bundle node1 --out ~/Downloads` |
 | Prepare a class fleet | `nebula-manager fleet bundle --select group:students --policy students` |
+| Default relay for all bundles | `nebula-manager relay default 10.100.0.1` |
 | Hand it out over HTTP | `nebula-manager fleet serve --dir fleet-bundles-* --user class` |
 | Share one bundle with croc | `nebula-manager fleet croc --select cert:node1` |
 | Diagnostics | `nebula-manager diag` |

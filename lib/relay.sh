@@ -145,6 +145,11 @@ relay_append_to_config() {
         saved="$PKI_RELAY_OVERRIDE"
     else
         saved="$(node_relay_get "$name" 2>/dev/null || true)"
+        if [[ -z "$saved" ]]; then
+            # No per-node setting: fall back to the manager-wide default relay.
+            local dflt; dflt="$(relay_default_get)"
+            [[ -n "$dflt" ]] && saved="use"$'\t'"$dflt"
+        fi
     fi
     [[ -n "$saved" ]] || return 0
     IFS=$'\t' read -r mode relays <<<"$saved"
@@ -155,9 +160,13 @@ relay_append_to_config() {
 
 # relay_sync_config <file> <cert> ; force the stored setting into an existing file.
 relay_sync_config() {
-    local file="$1" name="$2" saved mode relays
+    local file="$1" name="$2" saved mode relays dflt
     [[ -f "$file" ]] || return 0
     saved="$(node_relay_get "$name" 2>/dev/null || true)"
+    if [[ -z "$saved" ]]; then
+        dflt="$(relay_default_get)"
+        [[ -n "$dflt" ]] && saved="use"$'\t'"$dflt"
+    fi
     [[ -n "$saved" ]] || return 0
     IFS=$'\t' read -r mode relays <<<"$saved"
     if [[ -z "$mode" || "$mode" == "off" ]]; then
@@ -323,10 +332,15 @@ relay_check_config() {
 # relay_list_cell <name> ; compact form for `cert list` (no spaces, no commas).
 #   no | off | use:IP[;IP] | am | am+use:IP
 relay_list_cell() {
-    local name="$1" saved mode relays
+    local name="$1" saved mode relays dflt
     saved="$(node_relay_get "$name" 2>/dev/null || true)"
     if [[ -z "$saved" ]]; then
-        printf 'no'
+        dflt="$(relay_default_get)"
+        if [[ -n "$dflt" ]]; then
+            printf 'auto:%s' "${dflt//, /;}"
+        else
+            printf 'no'
+        fi
         return 0
     fi
     IFS=$'\t' read -r mode relays <<<"$saved"
@@ -339,12 +353,107 @@ relay_list_cell() {
     esac
 }
 
+# relay_normalize_list <csv or space separated> ; clean CSV ("10.0.0.1,10.0.0.2").
+relay_normalize_list() {
+    local raw="${1:-}" out="" item
+    [[ -n "$raw" ]] || return 0
+    raw="${raw//[[:space:]]/,}"
+    local -a parts=()
+    IFS=',' read -ra parts <<<"$raw"
+    for item in "${parts[@]}"; do
+        item="$(relay_normalize "$item")"
+        [[ -n "$item" ]] || continue
+        out+="${out:+,}${item}"
+    done
+    printf '%s' "$out"
+}
+
+# relay_default_get ; the default relay list for configs without a setting.
+# Order: $NEBULA_RELAY -> nebula-manager.conf [global] relay.
+relay_default_get() {
+    local raw="${NEBULA_RELAY:-}" conf="${SERVER_CONF:-}" src tmp=""
+    if [[ -z "$raw" ]]; then
+        raw="${GLOBAL_RELAY:-}"
+    fi
+    if [[ -z "$raw" && -n "$conf" && -f "$conf" ]]; then
+        src="$conf"
+        if [[ ! -r "$src" ]]; then
+            tmp="$(readable_nebula_config "$conf" 2>/dev/null)" || tmp=""
+            if [[ -n "$tmp" ]]; then src="$tmp"; else src=""; fi
+        fi
+        if [[ -n "$src" ]]; then
+            raw="$(awk -F= '
+                { sub(/\r$/, "") }
+                /^[ \t]*#/ { next }
+                { sub(/[ \t]*#.*$/, "") }
+                /^[ \t]*\[/ { in_global = ($0 ~ /^[ \t]*\[global\]/); next }
+                in_global && $1 ~ /^[ \t]*relay[ \t]*$/ { v = $2; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }
+            ' "$src" 2>/dev/null)"
+        fi
+        [[ -n "$tmp" && "$tmp" != "$conf" ]] && rm -f "$tmp"
+    fi
+    relay_normalize_list "$raw"
+}
+
+# relay_default_set <csv|empty> ; write [global] relay in the manager config.
+relay_default_set() {
+    local value tmp src
+    value="$(relay_normalize_list "${1:-}")"
+    local conf="${SERVER_CONF:-}"
+    [[ -n "$conf" ]] || conf="$(resolve_server_conf)"
+    [[ -n "$conf" ]] || { log_error "Cannot determine the manager config path."; return 1; }
+    SERVER_CONF="$conf"
+    _conf_ensure_exists || return 1
+    src="$conf"
+    if [[ ! -r "$conf" ]]; then
+        src="$(readable_nebula_config "$conf")" || src=""
+        [[ -n "$src" ]] || { log_error "Cannot read $conf (permission denied)."; return 1; }
+    fi
+    tmp="$(mktemp)" || return 1
+    awk -v v="$value" '
+        BEGIN { done = 0; seen = 0; in_global = 0 }
+        { sub(/\r$/, "") }
+        /^[ \t]*\[global\][ \t]*$/ { in_global = 1; seen = 1; print; next }
+        /^[ \t]*\[/ { if (in_global && !done) { if (v != "") print "relay=" v; done = 1 }
+                      in_global = 0; print; next }
+        in_global && /^[ \t]*relay[ \t]*=/ { if (!done) { if (v != "") print "relay=" v; done = 1 } next }
+        { print }
+        END {
+            if (done) exit
+            if (v == "") exit
+            if (in_global) { print "relay=" v; exit }
+            if (!seen) { print ""; print "[global]" }
+            print "relay=" v
+        }
+    ' "$src" > "$tmp" || { rm -f "$tmp"; [[ "$src" != "$conf" ]] && rm -f "$src"; return 1; }
+    [[ "$src" != "$conf" ]] && rm -f "$src"
+    if ! _conf_write "$tmp"; then
+        rm -f "$tmp"
+        log_error "Could not write $conf"
+        return 1
+    fi
+    rm -f "$tmp"
+    if [[ -n "$value" ]]; then
+        log_success "Default relay for client configs: $value ($conf)"
+        [[ -f "$conf" ]] && GLOBAL_RELAY="$value"
+    else
+        log_success "Default relay cleared ($conf)"
+        unset GLOBAL_RELAY 2>/dev/null || true
+    fi
+    return 0
+}
+
 # relay_show_cert <name> ; one line describing the stored per-node setting.
 relay_show_cert() {
-    local name="$1" saved mode relays
+    local name="$1" saved mode relays dflt
     saved="$(node_relay_get "$name" 2>/dev/null || true)"
     if [[ -z "$saved" ]]; then
-        printf 'not set (no relay: block)'
+        dflt="$(relay_default_get)"
+        if [[ -n "$dflt" ]]; then
+            printf 'default (use_relays: true, relays: %s)' "${dflt//,/, }"
+        else
+            printf 'not set (no relay: block)'
+        fi
         return 0
     fi
     IFS=$'\t' read -r mode relays <<<"$saved"
@@ -506,6 +615,11 @@ relay_batch_cli() {
             printf '  %-34s %-18s [%s]  %s\n' "$name" "${SEL_IPS[i]:-N/A}" \
                 "${SEL_GROUPS[i]//,/:}" "$state"
         done
+        local dflt; dflt="$(relay_default_get)"
+        if [[ -n "$dflt" ]]; then
+            printf '\nDefault for certificates without a setting: use_relays: true, relays: %s\n' "${dflt//,/, }"
+            printf 'Set with: nebula-manager relay default %s\n' "$dflt"
+        fi
         return 0
     fi
 
@@ -664,6 +778,99 @@ relay_batch_tui() {
 ###################################################################
 ################# this host: relay local (lighthouse) #############
 ###################################################################
+
+relay_default_usage() {
+    cat >&2 <<'EOF'
+Usage: nebula-manager relay default [IP[,IP]...]
+       nebula-manager relay default --show
+       nebula-manager relay default --clear
+
+Set (or show) the manager-wide default relay. Every node config and every
+bundle without a per-node setting gets it, so a new certificate is born with
+
+  relay:
+    am_relay: false
+    use_relays: true
+    relays:
+      - 10.100.0.1
+
+and `cert bundle` / `fleet bundle` / `fleet croc` always ship it.
+
+Stored as `relay=...` in the `[global]` section of the manager config
+(`nebula-manager config path`). `NEBULA_RELAY` overrides it for one run.
+A certificate with an explicit setting (cert relay --relay/--no-relay) keeps it.
+
+Apply the default to configs that already exist:
+  nebula-manager cert relay --select all --relay 10.100.0.1 --rebundle
+EOF
+}
+
+# relay_default_cli ; `nebula-manager relay default [IP...] | --show | --clear`
+relay_default_cli() {
+    local value="" show=0 clear=0
+    while (( $# )); do
+        case "$1" in
+            --show)          show=1 ;;
+            --clear|--none|--off) clear=1 ;;
+            --relay)         shift; value="${value:+$value,}${1:-}" ;;
+            --relay=*)       value="${value:+$value,}${1#*=}" ;;
+            -h|--help)       relay_default_usage; return 0 ;;
+            -*) log_error "Unknown option for 'relay default': $1"; relay_default_usage; return 2 ;;
+            *)  value="${value:+$value,}$1" ;;
+        esac
+        shift
+    done
+    local conf="${SERVER_CONF:-}"
+    [[ -n "$conf" ]] || conf="$(resolve_server_conf)"
+    SERVER_CONF="$conf"
+
+    if (( show )) || [[ -z "$value" && $clear -eq 0 ]]; then
+        local cur; cur="$(relay_default_get)"
+        if [[ -n "$cur" ]]; then
+            printf 'Default relay for client configs: %s\n' "${cur//,/, }"
+            if [[ -n "${NEBULA_RELAY:-}" ]]; then
+                printf '  source: NEBULA_RELAY (overrides the manager config)\n'
+            else
+                printf '  source: %s [global] relay\n' "$conf"
+            fi
+            printf '  applies to every node config and bundle without a per-node setting\n'
+        else
+            printf 'Default relay for client configs: none\n'
+            printf '  set it with: nebula-manager relay default 10.100.0.1\n'
+        fi
+        return 0
+    fi
+    if (( clear )); then
+        relay_default_set ""
+        return $?
+    fi
+
+    local -a addrs=() raw=() a
+    local norm
+    IFS=',' read -ra raw <<<"$value"
+    for a in "${raw[@]}"; do
+        norm="$(relay_normalize "$a")"
+        [[ -n "$norm" ]] || continue
+        if ! relay_valid_ip "$norm"; then
+            log_error "Not an IP address: '$norm' (Nebula relays are addresses, not host names)."
+            return 2
+        fi
+        addrs+=("$norm")
+    done
+    if (( ${#addrs[@]} == 0 )); then
+        log_error "Give at least one relay address (e.g. relay default 10.100.0.1)."
+        return 2
+    fi
+    for a in "${addrs[@]}"; do
+        if [[ -z "$(relay_owner "$a" "$(resolve_cert_dir)" || true)" ]]; then
+            log_warn "Relay $a is not a certificate in $(resolve_cert_dir) (yet) - set anyway."
+        fi
+    done
+    local csv; csv="$(printf '%s,' "${addrs[@]}")"; csv="${csv%,}"
+    relay_default_set "$csv" || return 1
+    printf '\nExisting configs keep their old content. Regenerate them with:\n  nebula-manager cert relay --select all --relay %s --rebundle\n' "$csv"
+    return 0
+}
 
 relay_local_usage() {
     cat >&2 <<'EOF'
@@ -883,6 +1090,25 @@ relay_local_cli() {
     return 0
 }
 
+# TUI: show/set/clear the manager-wide default relay for client configs.
+relay_default_tui() {
+    local cur choice addr
+    cur="$(relay_default_get)"
+    choice="$(ui_menu "Default relay" \
+        "Applied to every node config and bundle that has no per-node setting${cur:+ (current: $cur)}." \
+        show "Show the current default" \
+        set "Set the default relay (IP, comma-separated for several)" \
+        clear "Clear the default (new configs get no relay: block)")" || return 0
+    case "$choice" in
+        show)  relay_default_cli --show ;;
+        clear) relay_default_cli --clear ;;
+        set)
+            addr="$(ui_input "Default relay" "Relay overlay IP(s), comma-separated:" "${cur:-}")" || return 0
+            [[ -n "$addr" ]] || return 0
+            relay_default_cli "$addr" ;;
+    esac
+}
+
 relay_local_tui() {
     local cfg="${NEBULA_DIR:-/etc/nebula}/config.yml"
     local choice
@@ -907,6 +1133,8 @@ relay_usage() {
 Usage: nebula-manager relay <command> [options]
 
 Commands:
+  default  Set/show the default relay for every node config and bundle
+           (relay default 10.100.0.1 | --show | --clear).
   local    Show or change the relay settings in this host's config.yml
            (--am-relay on|off, --relay IP, --show).
 
@@ -918,8 +1146,9 @@ EOF
 relay_cli() {
     local sub="${1:-local}"; shift || true
     case "$sub" in
-        local|this-host|host) relay_local_cli "$@" ;;
-        -h|--help|help)       relay_usage ;;
-        *) log_error "Unknown 'relay' subcommand: $sub (expected: local)"; relay_usage; return 2 ;;
+        default|vendor|global) relay_default_cli "$@" ;;
+        local|this-host|host)  relay_local_cli "$@" ;;
+        -h|--help|help)        relay_usage ;;
+        *) log_error "Unknown 'relay' subcommand: $sub (expected: default, local)"; relay_usage; return 2 ;;
     esac
 }

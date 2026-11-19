@@ -235,6 +235,7 @@ _setup_menu_build() {
         "$(get_icon 'delete')Delete config"
         "$(get_icon 'list')Manage instances"
         "$(get_icon 'keys')Certificate workspace"
+        "$(get_icon 'connectivity')Default relay for client configs"
         "$(get_icon 'refresh')Reload & continue"
     )
     _SETUP_FNS=(
@@ -246,6 +247,7 @@ _setup_menu_build() {
         config_delete_tui
         server_menu
         select_cert_workspace
+        relay_default_tui
         tui_reload_request
     )
     if (( bootstrap )); then
@@ -266,7 +268,7 @@ setup_menu() {
     _setup_menu_build 0
     dynamic_menu_title=("$MENU_PATH" "Manager Setup")
     dynamic_menu dynamic_menu_title _SETUP_OPTS _SETUP_FNS 1 _setup_menu_refresh \
-        "Import, create or browse the manager config; install a client bundle; pick the cert workspace."
+        "Import/create/edit the manager config; client bundles; cert workspace; default relay."
     unset SETUP_MENU_BOOTSTRAP
 }
 
@@ -378,6 +380,9 @@ Commands:
                                   Show or change this host's relay settings
                                   (backup, nebula -test, service restart;
                                   --nebula-config FILE for a non-default config)
+  relay default [IP[,IP]...] [--show] [--clear]
+                                  Default relay for every node config and
+                                  bundle without a per-node setting
   cert store status|log|backup|git-init
                                   Certificate-store history: action log,
                                   datestamped backups or git snapshots

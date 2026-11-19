@@ -323,6 +323,14 @@ stored `<name>.yml`; `pki_bundle_client_zip` re-applies it onto
 `PKI_RELAY_OVERRIDE` renders a hypothetical setting for `--dry-run`, which is
 why the preview diffs are byte-identical to the real write.
 
+A **manager-wide default** (`relay default 10.100.0.1`, stored as `relay=` in
+the `[global]` section of the manager config, override `NEBULA_RELAY`) fills the
+gap for certificates that have no setting at all. The order is: per-node setting
+(incl. an explicit `off`) → default → no block. The default is applied at
+*render* time, never written into existing files, so it cannot silently rewrite
+a hand-tuned config; `cert relay --select all --relay … --rebundle` is the
+explicit way to apply it to an existing fleet.
+
 **Consequences.** “No setting” still means “no block”, so an untouched
 workspace renders exactly the config it rendered before. Relay addresses are
 validated against the certificate store (typos and expired relay certificates

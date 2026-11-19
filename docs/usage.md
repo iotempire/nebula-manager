@@ -147,6 +147,8 @@ commands and any errors remain visible for verification. Use `--clear-screen`
 ./nebula-manager cert relay --select name:router* --no-relay --dry-run
 ./nebula-manager relay local --show
 ./nebula-manager relay local --am-relay on
+./nebula-manager relay default 10.100.0.1     # every config/bundle without a setting
+./nebula-manager relay default --show
 
 # Fleet                      (TUI: Fleet)
 ./nebula-manager fleet bundle --select group:students --policy students

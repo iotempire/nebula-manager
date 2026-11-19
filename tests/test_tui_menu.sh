@@ -16,17 +16,18 @@ source "$REPO_ROOT/nebula-manager"
 
 # --- item lists ---
 _setup_menu_build 0
-assert_eq "setup menu: 9 items" "${#_SETUP_FNS[@]}" "9"
-assert_eq "setup menu: last action reloads" "${_SETUP_FNS[8]}" "tui_reload_request"
+assert_eq "setup menu: 10 items" "${#_SETUP_FNS[@]}" "10"
+assert_eq "setup menu: last action reloads" "${_SETUP_FNS[9]}" "tui_reload_request"
 assert_eq "setup menu: offers browse" "$(printf '%s\n' "${_SETUP_FNS[@]}" | grep -c '^config_browse_tui$')" "1"
 assert_eq "setup menu: offers delete" "$(printf '%s\n' "${_SETUP_FNS[@]}" | grep -c '^config_delete_tui$')" "1"
 assert_eq "setup menu: offers import first" "${_SETUP_FNS[0]}" "import_run"
 assert_eq "setup menu: offers client bundle import" "${_SETUP_FNS[1]}" "import_bundle_tui"
+assert_eq "setup menu: offers the default relay" "$(printf '%s\n' "${_SETUP_FNS[@]}" | grep -c '^relay_default_tui$')" "1"
 assert_contains "setup menu: labels the bundle import" "${_SETUP_OPTS[1]}" "Import client bundle"
 
 _setup_menu_build 1
-assert_eq "bootstrap menu: adds Exit (10 items)" "${#_SETUP_FNS[@]}" "10"
-assert_eq "bootstrap menu: last action exits" "${_SETUP_FNS[9]}" "exit"
+assert_eq "bootstrap menu: adds Exit (11 items)" "${#_SETUP_FNS[@]}" "11"
+assert_eq "bootstrap menu: last action exits" "${_SETUP_FNS[10]}" "exit"
 
 # --- refresh hook supplies the detected-state prompt ---
 conf="$XDG_CONFIG_HOME/nebula-manager/nebula-manager.conf"

@@ -269,6 +269,63 @@ assert_contains "firewall explain shows the relay address" "$out" "10.91.0.1"
 out="$(relay_config_line "$SANDBOX/local-peer.yml")"
 assert_contains "a config without the block is reported as such" "$out" "none (no relay: block)"
 
+# --- 11) manager-wide default relay ---------------------------------------
+default_conf="$SANDBOX/nm.conf"
+printf '[global]\nbin_path=/usr/bin\n' > "$default_conf"
+export SERVER_CONF="$default_conf"
+
+out="$(relay_default_cli --show 2>&1)"
+assert_contains "no default is reported" "$out" "none"
+
+out="$(relay_default_cli 10.91.0.1 2>&1)"
+assert_eq "setting the default exits 0" "$?" "0"
+assert_contains "the default is stored in [global]" "$(cat "$default_conf")" "relay=10.91.0.1"
+assert_contains "setting reports the default" "$out" "Default relay for client configs: 10.91.0.1"
+
+out="$(relay_default_cli --show 2>&1)"
+assert_contains "the default is shown" "$out" "10.91.0.1"
+assert_contains "the source is named" "$out" "[global] relay"
+
+# A certificate without a setting is born with the block.
+CERT_DIR="$keys" SIGN_NAME="frank.mesh" SIGN_IP="10.91.0.7/16" pki_sign >/dev/null 2>&1
+pki_node_config_write_for_fw frank.mesh "$keys" 1 >/dev/null 2>&1
+assert_contains "the default reaches a new node config" \
+    "$(relay_block "$keys/frank.mesh.yml")" "    - 10.91.0.1"
+pki_bundle_client_zip frank.mesh "$outdir" "$keys" "" "" "" >/dev/null 2>&1
+tmpl="$(unzip -p "$outdir/frank.mesh-nebula-bundle.zip" config.yml.template)"
+assert_contains "the default reaches a bundle" "$tmpl" "use_relays: true"
+assert_contains "the bundle carries the default address" "$tmpl" "- 10.91.0.1"
+
+# An explicit per-node setting always wins (here: no block at all).
+node_relay_set frank.mesh off ""
+pki_node_config_write_for_fw frank.mesh "$keys" 1 >/dev/null 2>&1
+assert_not_contains "an explicit off beats the default" "$(cat "$keys/frank.mesh.yml")" "relay:"
+node_relay_set frank.mesh use "10.91.0.2"
+pki_node_config_write_for_fw frank.mesh "$keys" 1 >/dev/null 2>&1
+assert_contains "an explicit setting beats the default" "$(relay_block "$keys/frank.mesh.yml")" "    - 10.91.0.2"
+
+out="$(list_certs 2>&1)"
+assert_contains "cert list marks default-driven certs" "$out" "auto:10.91.0.1"
+out="$(relay_batch_cli --select cert:lh.mesh --show 2>&1)"
+assert_contains "show names the default" "$out" "Default for certificates without a setting"
+
+out="$(NEBULA_RELAY=10.91.0.3 relay_default_get)"
+assert_eq "NEBULA_RELAY overrides the config" "$out" "10.91.0.3"
+
+out="$(relay_default_cli 10.91.0.1,10.91.0.2 2>&1)"
+assert_contains "several defaults are stored" "$(cat "$default_conf")" "relay=10.91.0.1,10.91.0.2"
+
+out="$(relay_default_cli --clear 2>&1)"
+assert_eq "clearing exits 0" "$?" "0"
+assert_not_contains "clearing removes the key" "$(cat "$default_conf")" "relay="
+assert_contains "clearing is reported" "$out" "cleared"
+assert_contains "other [global] keys survive" "$(cat "$default_conf")" "bin_path=/usr/bin"
+
+out="$(relay_default_cli 10.91.0.1,teleport.local 2>&1)"; rc=$?
+assert_eq "a host name is refused as default" "$rc" "2"
+assert_contains "the bad default is named" "$out" "Not an IP address"
+unset SERVER_CONF
+
 assert_eq "only the service restart needed root" "$(sudo_count)" "1"
 
 harness_summary

@@ -119,6 +119,45 @@ nebula-manager cert relay --select group:students --relay 10.100.0.1 --yes
 nebula-manager fleet bundle --select group:students --policy students
 ```
 
+### One default for everything
+
+Instead of setting the relay per certificate, set it **once** for the whole
+workspace. Every node config and every bundle without a per-node setting is then
+born with the block:
+
+```bash
+nebula-manager relay default 10.100.0.1      # store it in the manager config
+nebula-manager relay default --show          # what is set, and where it comes from
+nebula-manager relay default --clear         # back to "no block unless asked"
+```
+
+```
+$ nebula-manager relay default 10.100.0.1
+[✔] Default relay for client configs: 10.100.0.1 (/home/you/.config/nebula-manager/nebula-manager.conf)
+```
+
+- Stored as `relay=10.100.0.1` in the `[global]` section of the manager config
+  (`nebula-manager config path`), so it survives new shells and applies to every
+  later `sign`, `cert config generate`, `cert bundle`, `fleet bundle` and
+  `fleet croc`.
+- `NEBULA_RELAY=10.100.0.1` overrides it for a single run.
+- A **per-node setting always wins**: `cert relay --relay …` / `--no-relay` (and
+  `sign --relay`) keep their own value; `off` suppresses the default for that
+  node.
+- Existing `<name>.yml` files are **not** rewritten by setting the default — the
+  default is applied when a config is rendered. To apply it to the current
+  fleet in one go:
+
+  ```bash
+  nebula-manager cert relay --select all --relay 10.100.0.1 --rebundle
+  ```
+
+  (`--rebundle` also refreshes the exported archives, so the next handout is
+  immediately correct.)
+- `cert list` shows `auto:<ip>` for certificates that inherit the default.
+
+**TUI:** *Manager Setup ▸ Default relay for client configs*.
+
 ### New certificates
 
 ```bash
