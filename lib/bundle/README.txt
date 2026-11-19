@@ -6,7 +6,7 @@ Files
   @NAME@.crt           client certificate
   @NAME@.key           client private key (keep secret)
   ca.crt               certificate authority
-  config.yml.template  ready-to-install Nebula config
+  config.yml           ready-to-install Nebula config (firewall + relay included)
   install.sh           Linux / macOS installer
   install.ps1          Windows installer (PowerShell)
   README.txt           this file

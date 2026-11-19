@@ -19,7 +19,7 @@ CERT_DIR="$PKI" SIGN_NAME="client1" SIGN_IP="10.80.0.2/24" SIGN_GROUPS="clients"
 SRC="$SANDBOX/bundle-src"
 mkdir -p "$SRC"
 cp "$PKI/ca.crt" "$PKI/client1.crt" "$PKI/client1.key" "$SRC/"
-cat > "$SRC/config.yml.template" <<'YAML'
+cat > "$SRC/config.yml" <<'YAML'
 pki:
   ca: /etc/nebula/ca.crt
   cert: /etc/nebula/client1.crt
@@ -31,7 +31,7 @@ listen:
 YAML
 chmod 600 "$SRC/client1.key"
 ARCHIVE="$SANDBOX/client1.tar.gz"
-tar -czf "$ARCHIVE" -C "$SRC" ca.crt client1.crt client1.key config.yml.template
+tar -czf "$ARCHIVE" -C "$SRC" ca.crt client1.crt client1.key config.yml
 
 # --- function import into a user-owned directory ---------------------------
 CONF="$SANDBOX/manager.conf"

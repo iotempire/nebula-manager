@@ -281,4 +281,13 @@ assert_contains "V2 requirement is explained"   "$out" "V2 certificate"
 assert_contains "upgrade hint is printed"       "$out" "Upgrade Nebula to v1.10+"
 rm -f "$SANDBOX/bin/nebula"
 
+# --- legacy bundle: config.yml.template still installs ----------------------
+legacy="$SANDBOX/legacy-bundle"
+cp -r "$unpack" "$legacy"
+mv "$legacy/config.yml" "$legacy/config.yml.template"
+legacy_target="$SANDBOX/legacy-client"
+out="$(bash "$legacy/install.sh" --dir "$legacy_target" --no-start --yes --no-dns 2>&1)"; rc=$?
+assert_eq "a pre-rename bundle still installs" "$rc" "0"
+assert_file "the legacy config was installed as config.yml" "$legacy_target/config.yml"
+
 harness_summary

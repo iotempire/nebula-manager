@@ -96,14 +96,23 @@ for manual confirmation need a real Windows/macOS/Android/iOS host.
       allocates from `100.64.0.0/10` and NetBird defaults to a `/16` for the same reason.
 - [ ] **Better menu hierarchy** – revisit the top-level grouping once the fleet
       features land (the current rename to *Instances* / *Instance Settings* /
-      *Updates & Install* / *Manager Setup* is the surgical first step):
-      - **Option A** – merge *Connectivity* + *Diagnostics* + *Benchmarks* into a
-        single **Test & Diagnose** menu.
-      - **Option B** (target) – top level **This Mesh / This Host / Tests & Tools /
-        Manager**, which scales to multi-host fleets and pods.
-      - Add a one-line purpose/subtitle to every menu (shown in the header) so
-        the difference between *Instance Settings* and *Updates & Install* is
-        obvious without opening them.
+      *Updates & Install* / *Manager Setup* is the surgical first step). The
+      policy work made the real problem visible: *Certificate Management* mixes
+      identity, policies and distribution. Target structure (see
+      [policy-cookbook.md](policy-cookbook.md#menu-structure--the-current-state-and-a-proposal)):
+      - **Certificates** – identity only (list/sign/revoke/expiry, groups,
+        workspace, store history).
+      - **Policies** – packs, batch firewall for nodes, relay for nodes.
+      - **Distribute** – bundle, serve (HTTP), croc, SSH push, probe.
+      - **This host** – config edit/validate, local firewall, local relay, DNS,
+        service control.
+      - Smaller steps that help meanwhile: merge *Connectivity* + *Diagnostics* +
+        *Benchmarks* into **Test & Diagnose**; keep the one-line subtitle on every
+        menu (already implemented); make every action either headless-documented
+        or removed, so the TUI and the CLI never drift apart.
+      - **Done already:** policy choices state their rules (`policy explain`,
+        `policy list`, pack menu labels, batch preview, bundle log) and
+        *Certificates ▸ Policy Packs* exists as the pack library.
 - [ ] **Pod/container support** – detect Nebula running under `podman`/`docker` and
       route lifecycle actions through the container runtime instead of `systemctl`.
 - [ ] **macOS `launchd` in the TUI** – the bundle's `install.sh` already restarts

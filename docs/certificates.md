@@ -283,7 +283,7 @@ next to the certificate automatically the next time they are used or generated.
   one node, or regenerate every config. Editing needs no root: it is a normal
   user-owned file.
 - **Certificates ▸ Bundle / Export Client** ships the stored config as
-  `config.yml.template`. An explicit `--policy`/`--firewall` choice still wins
+  `config.yml`. An explicit `--policy`/`--firewall` choice still wins
   and refreshes the stored copy.
 - Mobile/`--in-pub` certificates have no client config (the app manages it).
 - The config contains no private key; only the bundle adds the `.key`.

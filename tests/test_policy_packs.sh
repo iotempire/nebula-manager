@@ -68,7 +68,7 @@ if policy_validate "$policy_path_file"; then _ok "pack validates"; else _bad "pa
 list="$(policy_list)"
 assert_contains "list shows the pack" "$list" "home"
 assert_contains "list shows the target group" "$list" "home"
-assert_contains "list shows the rule count" "$list" "3 rule(s)"
+assert_contains "list shows what the pack allows" "$list" "inbound: groups home"
 
 show="$(policy_show home)"
 assert_contains "show prints the firewall" "$show" "inbound_action: drop"
@@ -89,7 +89,7 @@ sugg="$(policy_suggest_for_cert roam.mesh "$keys")"
 assert_eq "no suggestion for an unrelated group" "$sugg" ""
 
 # --- embed in a generated client config ------------------------------------
-tmpl="$SANDBOX/config.yml.template"
+tmpl="$SANDBOX/config.yml"
 pki_write_client_config "$tmpl" "home1.mesh" "$keys" "$(policy_resolve home)"
 assert_contains "template names the pack" "$(cat "$tmpl")" "Firewall policy pack: home"
 assert_eq "template uses the pack's default action" "$(yq -r '.firewall.inbound_action' "$tmpl")" "drop"
@@ -103,7 +103,7 @@ pki_bundle_client_zip home1.mesh "$SANDBOX/out" "$keys" "$(policy_resolve home)"
 zipfile="$SANDBOX/out/home1.mesh-nebula-bundle.zip"
 assert_file "bundle with a policy was created" "$zipfile"
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$zipfile" config.yml.template > "$SANDBOX/fromzip.yml"
+    unzip -p "$zipfile" config.yml > "$SANDBOX/fromzip.yml"
     assert_eq "zip template uses the policy" \
         "$(yq -r '.firewall.inbound_action' "$SANDBOX/fromzip.yml")" "drop"
 else
@@ -128,7 +128,7 @@ hint="$(bash "$REPO_ROOT/nebula-manager" cert bundle home1.mesh --cert-dir "$key
 assert_contains "CLI suggests the pack" "$hint" "Suggested policy pack"
 assert_contains "CLI says nothing is automatic" "$hint" "nothing is applied automatically"
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$SANDBOX/cliout2/home1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/nopolicy.yml"
+    unzip -p "$SANDBOX/cliout2/home1.mesh-nebula-bundle.zip" config.yml > "$SANDBOX/nopolicy.yml"
     if grep -q 'Firewall policy pack:' "$SANDBOX/nopolicy.yml"; then
         _bad "CLI does not silently embed a suggested policy"
     else
@@ -142,7 +142,7 @@ mkdir -p "$SANDBOX/tuiout"
 printf '1\n1\n%s\n' "$SANDBOX/tuiout" | pki_bundle_client_menu >/dev/null 2>&1
 assert_file "TUI bundle exists" "$SANDBOX/tuiout/home1.mesh-nebula-bundle.zip"
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$SANDBOX/tuiout/home1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/tuipolicy.yml"
+    unzip -p "$SANDBOX/tuiout/home1.mesh-nebula-bundle.zip" config.yml > "$SANDBOX/tuipolicy.yml"
     assert_eq "TUI bundle uses the chosen policy" \
         "$(yq -r '.firewall.inbound_action' "$SANDBOX/tuipolicy.yml")" "drop"
 fi
@@ -183,6 +183,45 @@ bash "$REPO_ROOT/nebula-manager" policy validate imported >/dev/null 2>&1
 assert_eq "CLI validate exits 0" "$?" "0"
 bash "$REPO_ROOT/nebula-manager" policy delete imported --yes >/dev/null 2>&1
 assert_no_file "CLI deleted the pack" "$(policy_dir)/imported.yml"
+
+# --- summaries and explanation ---------------------------------------------
+gp="$(node_fw_render_group_policy "lab01,instructor")"
+sum="$(policy_summary "$gp")"
+assert_contains "summary names the first group" "$sum" "group lab01"
+assert_contains "summary names the instructor group" "$sum" "group instructor"
+assert_contains "summary names the ICMP rule" "$sum" "icmp from any"
+assert_contains "summary names the outbound side" "$sum" "outbound: any"
+sum_short="$(policy_summary_short "$gp")"
+assert_contains "short summary abbreviates inbound" "$sum_short" "in: group lab01"
+assert_contains "short summary abbreviates outbound" "$sum_short" "out: any"
+rm -f "$gp"
+
+sum="$(policy_summary "$(node_fw_render_policy default)")"
+assert_contains "default mode summary shows ICMP only" "$sum" "inbound: icmp from any"
+rm -f "$(node_fw_render_policy default)" 2>/dev/null || true
+
+out="$(policy_list)"
+assert_contains "policy list shows rules, not just counts" "$out" "inbound: group"
+assert_contains "policy list explains how to drill down" "$out" "policy explain"
+
+out="$(policy_explain_cli home 2>&1)"
+assert_eq "policy explain exits 0" "$?" "0"
+assert_contains "explain names the pack" "$out" "Policy pack: home"
+assert_contains "explain prints the rules" "$out" "inbound:"
+assert_contains "explain prints the unmatched action" "$out" "unmatched: inbound"
+
+out="$(policy_explain_cli --group lab01 2>&1)"
+assert_contains "explain renders a group policy" "$out" "Group policy for lab01"
+assert_contains "group explain mentions ICMP" "$out" "ICMP for diagnostics"
+out="$(policy_explain_cli --group lab01 --no-icmp 2>&1)"
+assert_contains "explain honours --no-icmp" "$out" "no ICMP"
+assert_not_contains "no-icmp summary has no icmp rule" "$out" "icmp from any"
+
+out="$(policy_explain_cli --mode default 2>&1)"
+assert_contains "explain renders a built-in mode" "$out" "Built-in mode: default"
+
+out="$(policy_explain_cli --mode bogus 2>&1)"; rc=$?
+assert_eq "a bad mode is refused" "$rc" "2"
 
 # --- safety -----------------------------------------------------------------
 assert_eq "no sudo used anywhere" "$(sudo_count)" "0"

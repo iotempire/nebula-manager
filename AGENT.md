@@ -116,7 +116,7 @@ build_single.sh           dist/nebula-manager builder
 |---|---|
 | certificate/PKI behaviour | `docs/certificates.md`, `docs/usage.md` |
 | bundles/installers | `docs/bundles.md`, `docs/linux-distros.md` (Windows: the `install.ps1` section in `docs/bundles.md`) |
-| firewall/policy | `docs/firewall.md` |
+| firewall/policy | `docs/firewall.md`, `docs/policy-cookbook.md` |
 | relay | `docs/relay.md`, `docs/decisions.md` (ADR-14/15) |
 | fleet/SSH/HTTP | `docs/fleet.md`, `docs/user-stories.md` (Phase 2e) |
 | menus/UX | `docs/preview.md`, `docs/user-stories.md` |

@@ -255,7 +255,7 @@ $ nebula-manager cert bundle theprof4.theprof.mesh --out ./bundles
 ```
 
 Each bundle (`./bundles/theprof3.theprof.mesh-nebula-bundle.zip`) contains the cert, key,
-`ca.crt` and a `config.yml.template`. The template is the **stored per-node
+`ca.crt` and a `config.yml`. The template is the **stored per-node
 config** (`theprof3.theprof.mesh.yml`, next to the cert/key), populated from the running
 Nebula config (or from the `[server.*]` entries + certificates): real
 `static_host_map`/`lighthouse.hosts`, `punchy`, `listen`, `tun` and the firewall
@@ -333,7 +333,7 @@ so `*.theprof.mesh` is routed to the lighthouse via `systemd-resolved`.
 unzip ~/theprof3.theprof.mesh-nebula-bundle.zip -d ~/nb
 sudo install -d /etc/nebula
 sudo cp ~/nb/{ca.crt,theprof3.theprof.mesh.crt,theprof3.theprof.mesh.key} /etc/nebula/
-sudo cp ~/nb/config.yml.template /etc/nebula/config.yml
+sudo cp ~/nb/config.yml /etc/nebula/config.yml
 ```
 
 </details>
@@ -528,7 +528,7 @@ $ nebula-manager cert bundle theprof-ge75.theprof.mesh --policy home
 $ nebula-manager cert bundle theprof-ge75.theprof.mesh --policy none   # opt out
 ```
 
-The bundle's `config.yml.template` then starts the firewall with
+The bundle's `config.yml` then starts the firewall with
 `# Firewall policy pack: home` and the pack's rules.
 
 **Existing machines** (theprof3/.4 are already running): render the pack for

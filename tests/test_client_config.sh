@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test: generated client config.yml.template.
+# Test: generated client config.yml.
 # Verifies that real network settings are taken from the local Nebula config
 # and, when that is unavailable, from [server.*] entries + certificates. Also
 # verifies that anything undetermined is flagged in the file and on stderr.
@@ -147,10 +147,13 @@ if command -v zip >/dev/null 2>&1; then
         CONF_OVERRIDE="$SANDBOX/no-manager.conf" \
         pki_bundle_client_zip "client1" "$SANDBOX/zipout" "$KEYS" >/dev/null 2>&1
     if command -v unzip >/dev/null 2>&1; then
-        unzip -p "$SANDBOX/zipout/client1-nebula-bundle.zip" config.yml.template > "$SANDBOX/ziptpl"
+        unzip -p "$SANDBOX/zipout/client1-nebula-bundle.zip" config.yml > "$SANDBOX/ziptpl"
         cfg="$(cat "$SANDBOX/ziptpl")"
         assert_contains "zip template has the real static_host_map" "$cfg" '"10.100.0.1": ["vps.example:4545"]'
         assert_contains "zip template has the real lighthouse" "$cfg" '    - "10.100.0.1"'
+        listing="$(unzip -l "$SANDBOX/zipout/client1-nebula-bundle.zip" 2>/dev/null)"
+        assert_contains "the bundle ships config.yml (not a .template)" "$listing" "config.yml"
+        assert_not_contains "no stale config.yml.template in the bundle" "$listing" "config.yml.template"
     fi
 fi
 

@@ -50,7 +50,7 @@ sensible defaults: `NEBULA_BUNDLE_DIR` (when set) → the **last used** folder �
 entry, and the choice is remembered in
 `~/.config/nebula-manager/bundle-dir`.
 
-The archive contains the cert, key, `ca.crt`, `config.yml.template`,
+The archive contains the cert, key, `ca.crt`, `config.yml`,
 **`install.sh`**, **`install.ps1`**, a `README.txt` with client instructions and —
 when the mesh suffix and the lighthouse IPs are known — a `nebula-dns.conf`
 that lets the installer set up name resolution. The archive is written mode
@@ -167,7 +167,7 @@ corresponding `firewall:` block.
 On a machine that already has nebula-manager, **Manager Setup ▸ Import client
 bundle (.zip/.tar.gz)** opens a file browser, extracts
 the archive safely, validates `ca.crt` plus the matching `<name>.crt`/`<name>.key`,
-and installs them together with the bundled `config.yml.template` (renamed to
+and installs them together with the bundled `config.yml` (renamed to
 `config.yml`, with `/etc/nebula` rewritten if you choose another target).
 On a bare client, use the self-contained `install.sh` / `install.ps1` from the
 archive instead (see above).

@@ -182,7 +182,7 @@ nebula-manager cert bundle theprof-ge75.theprof.mesh --policy home
 nebula-manager cert bundle theprof-ge75.theprof.mesh --policy none   # opt out
 ```
 
-The generated `config.yml.template` then carries the pack's `firewall:` section
+The generated `config.yml` then carries the pack's `firewall:` section
 (and a `# Firewall policy pack: home` header) instead of the detected rules.
 
 **Existing fleet:** render the pack for every matching certificate. Each host

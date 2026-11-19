@@ -125,7 +125,7 @@ assert_no_file "the refused certificate was not signed" "$keys/eve.mesh.crt"
 # --- 7) bundles carry the block --------------------------------------------
 outdir="$SANDBOX/bundles"
 pki_bundle_client_zip dave.mesh "$outdir" "$keys" "" "" "" >/dev/null 2>&1
-tmpl="$(unzip -p "$outdir/dave.mesh-nebula-bundle.zip" config.yml.template)"
+tmpl="$(unzip -p "$outdir/dave.mesh-nebula-bundle.zip" config.yml)"
 assert_contains "bundle template has am_relay" "$tmpl" "am_relay: false"
 assert_contains "bundle template has use_relays" "$tmpl" "use_relays: true"
 assert_contains "bundle template has the relay list" "$tmpl" "relays:"
@@ -135,7 +135,7 @@ assert_contains "bundle template has the relay address" "$tmpl" "- 10.91.0.1"
 # bundle again without regenerating the stored config by hand.
 node_relay_set dave.mesh use "10.91.0.3"
 pki_bundle_client_zip dave.mesh "$outdir" "$keys" "" "" "" >/dev/null 2>&1
-tmpl="$(unzip -p "$outdir/dave.mesh-nebula-bundle.zip" config.yml.template)"
+tmpl="$(unzip -p "$outdir/dave.mesh-nebula-bundle.zip" config.yml)"
 assert_contains "a newer setting reaches an older stored config" "$tmpl" "- 10.91.0.3"
 
 # --- 8) fleet ssh --relay (mocked ssh) -------------------------------------
@@ -292,7 +292,7 @@ pki_node_config_write_for_fw frank.mesh "$keys" 1 >/dev/null 2>&1
 assert_contains "the default reaches a new node config" \
     "$(relay_block "$keys/frank.mesh.yml")" "    - 10.91.0.1"
 pki_bundle_client_zip frank.mesh "$outdir" "$keys" "" "" "" >/dev/null 2>&1
-tmpl="$(unzip -p "$outdir/frank.mesh-nebula-bundle.zip" config.yml.template)"
+tmpl="$(unzip -p "$outdir/frank.mesh-nebula-bundle.zip" config.yml)"
 assert_contains "the default reaches a bundle" "$tmpl" "use_relays: true"
 assert_contains "the bundle carries the default address" "$tmpl" "- 10.91.0.1"
 

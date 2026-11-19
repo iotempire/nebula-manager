@@ -96,7 +96,7 @@ assert_contains "a2 remembers the pack" "$(cat "$state")" $'a2.mesh\tpack\tgroup
 mkdir -p "$SANDBOX/out"
 pki_bundle_client_zip a1.mesh "$SANDBOX/out" "$keys" >/dev/null 2>&1
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$SANDBOX/out/a1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/bundle.yml"
+    unzip -p "$SANDBOX/out/a1.mesh-nebula-bundle.zip" config.yml > "$SANDBOX/bundle.yml"
     assert_eq "bundle ships the group firewall" \
         "$(yq -r '.firewall.inbound[0].group' "$SANDBOX/bundle.yml")" "ulno"
 else

@@ -115,7 +115,7 @@ pki_bundle_client_zip node1.mesh "$SANDBOX/out" "$keys" >/dev/null 2>&1
 bundle="$SANDBOX/out/node1.mesh-nebula-bundle.zip"
 assert_file "bundle created" "$bundle"
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$bundle" config.yml.template > "$SANDBOX/fromzip.yml"
+    unzip -p "$bundle" config.yml > "$SANDBOX/fromzip.yml"
     assert_contains "bundle ships the stored (edited) config" \
         "$(cat "$SANDBOX/fromzip.yml")" "CUSTOM-EDIT-MARKER"
 else
@@ -129,7 +129,7 @@ pki_bundle_client_zip node1.mesh "$SANDBOX/out2" "$keys" "$pol" >/dev/null 2>&1
 rm -f "$pol"
 assert_not_contains "an explicit policy overrides the stored edit" "$(cat "$cfg_path")" "CUSTOM-EDIT-MARKER"
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$SANDBOX/out2/node1.mesh-nebula-bundle.zip" config.yml.template > "$SANDBOX/fromzip2.yml"
+    unzip -p "$SANDBOX/out2/node1.mesh-nebula-bundle.zip" config.yml > "$SANDBOX/fromzip2.yml"
     if command -v yq >/dev/null 2>&1; then
         assert_eq "override bundle carries the permissive firewall" \
             "$(yq -r '.firewall.inbound_action' "$SANDBOX/fromzip2.yml" 2>/dev/null)" "drop"

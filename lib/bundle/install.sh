@@ -233,10 +233,10 @@ done
 [[ -n "$CERT" ]] || die "no <name>.crt + <name>.key pair found in $BUNDLE_DIR"
 
 TMPL=""
-for c in "$BUNDLE_DIR/config.yml.template" "$BUNDLE_DIR/config.yml"; do
+for c in "$BUNDLE_DIR/config.yml" "$BUNDLE_DIR/config.yml.template"; do
     [[ -f "$c" ]] && { TMPL="$c"; break; }
 done
-[[ -n "$TMPL" ]] || die "config.yml.template / config.yml not found in $BUNDLE_DIR"
+[[ -n "$TMPL" ]] || die "config.yml not found in $BUNDLE_DIR"
 
 # --- bundle metadata (mesh DNS + lighthouse hostnames) ----------------------
 BUNDLE_DNS_FILE="$BUNDLE_DIR/nebula-dns.conf"

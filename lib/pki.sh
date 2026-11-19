@@ -1705,7 +1705,7 @@ pki_cert_is_lighthouse() {
 # policy-pack path (4th arg) replaces the firewall section.
 pki_write_client_config() {
     local outfile="$1" name="$2" cert_dir="${3:-$(resolve_cert_dir)}" policy_path="${4:-}"
-    local label="${5:-config.yml.template}"
+    local label="${5:-config.yml}"
     pki_detect_network_config "$cert_dir"
     if [[ -n "$policy_path" ]]; then
         [[ -f "$policy_path" ]] || { log_error "Policy pack not found: $policy_path"; return 1; }
@@ -2284,6 +2284,12 @@ EOF
     echo
     echo "Firewall for ${#SEL_NAMES[@]} selected certificate(s) in $cert_dir:"
     echo "  Change: $desc"
+    # Say what the rules actually do before anything is written: "policy pack
+    # family-home" alone does not tell you whether SSH stays reachable.
+    if [[ -n "$policy" ]] && declare -F policy_summary >/dev/null; then
+        local _sum
+        _sum="$(policy_summary "$policy" 2>/dev/null)" && echo "  Rules:  $_sum"
+    fi
     pki_firewall_apply_selected "$cert_dir" "$mode" "$pack" "$policy" "$desc" "$include_lh" 1
     echo
 
@@ -2684,6 +2690,9 @@ pki_bundle_client_zip() {
             policy_validate "$policy_path" || return 1
         fi
         log_info "Using firewall policy pack: $(basename "$policy_path" .yml)"
+        if declare -F policy_summary >/dev/null; then
+            local _ps; _ps="$(policy_summary "$policy_path" 2>/dev/null)" && log_info "  firewall: $_ps"
+        fi
     fi
     debug_explain "Bundling the client certificate, private key, ca.crt and a config template; the archive is mode 0600 because it contains the key."
     [[ -n "$policy_path" ]] && debug_explain "Embedding firewall policy pack '$(basename "$policy_path" .yml)' in the config template."
@@ -2709,7 +2718,7 @@ pki_bundle_client_zip() {
     # signing time are what actually ships. An explicit policy/firewall override
     # on the command line still wins and refreshes the stored copy.
     if [[ -n "$policy_path" ]]; then
-        pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" "$policy_path" || {
+        pki_write_client_config "$tmp/config.yml" "$name" "$cert_dir" "$policy_path" || {
             log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
         if declare -F pki_node_config_write >/dev/null; then
             pki_node_config_write "$name" "$cert_dir" "$policy_path" 1 >/dev/null || true
@@ -2720,10 +2729,10 @@ pki_bundle_client_zip() {
         fi
         local node_cfg; node_cfg="$(pki_node_config_find "$name" "$cert_dir")"
         if [[ -s "$node_cfg" ]]; then
-            cp "$node_cfg" "$tmp/config.yml.template"
+            cp "$node_cfg" "$tmp/config.yml"
             debug_info "bundle config: reusing stored node config $node_cfg"
         else
-            pki_write_client_config "$tmp/config.yml.template" "$name" "$cert_dir" || {
+            pki_write_client_config "$tmp/config.yml" "$name" "$cert_dir" || {
                 log_error "Could not render the client config."; rm -rf "$tmp"; return 1; }
         fi
     fi
@@ -2731,11 +2740,11 @@ pki_bundle_client_zip() {
     # A saved per-node relay setting wins over whatever the stored config says, so
     # a bundle can never be made from a config that predates the setting.
     if declare -F relay_sync_config >/dev/null; then
-        relay_sync_config "$tmp/config.yml.template" "$name"
+        relay_sync_config "$tmp/config.yml" "$name"
     fi
 
     # Self-contained installers (Linux/macOS + Windows) and a client README.
-    local -a files=( "$name.crt" "$name.key" "ca.crt" "config.yml.template" )
+    local -a files=( "$name.crt" "$name.key" "ca.crt" "config.yml" )
     local asset_dir asset have_assets=1
     asset_dir="$(pki_bundle_asset_dir)"
     for asset in install.sh install.ps1 README.txt; do
@@ -2816,7 +2825,7 @@ pki_bundle_client_zip() {
     fi
     (( have_zip )) || log_warn "zip not found; wrote $zipfile instead."
     log_success "Client bundle created: $zipfile"
-    log_info "Contains: ${name}.crt, ${name}.key, ca.crt, config.yml.template$([[ $have_assets == 1 ]] && echo ', install.sh, install.ps1, README.txt')$([[ $have_dns == 1 ]] && echo ', nebula-dns.conf') (keep it safe - it holds the private key)."
+    log_info "Contains: ${name}.crt, ${name}.key, ca.crt, config.yml$([[ $have_assets == 1 ]] && echo ', install.sh, install.ps1, README.txt')$([[ $have_dns == 1 ]] && echo ', nebula-dns.conf') (keep it safe - it holds the private key)."
     pki_bundle_share_instructions "$zipfile" "$http_url" "$croc_code"
     printf '%s\n' "$zipfile"
 }
@@ -3673,6 +3682,7 @@ manage_nebula_certs() {
         "$(get_icon 'edit')Rename Group in Certificates"
         "$(get_icon 'edit')Edit Groups (Batch)…"
         "$(get_icon 'security')Firewall for Nodes (Batch)…"
+        "$(get_icon 'firewall')Policy Packs (what each one allows)…"
         "$(get_icon 'connectivity')Relay for Nodes (Batch)…"
         "$(get_icon 'inspect')View Certificate and Key Details"
         "$(get_icon 'hour-glass')Certificate Expiry"
@@ -3691,6 +3701,7 @@ manage_nebula_certs() {
         "pki_rename_group_tui"
         "pki_group_edit_tui"
         "pki_firewall_batch_tui"
+        "policy_menu_tui"
         "relay_batch_tui"
         "view_cert_details"
         "list_certs_expiry"

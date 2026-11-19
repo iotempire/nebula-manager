@@ -82,11 +82,11 @@ $pair = Get-ChildItem -LiteralPath $BundleDir -Filter '*.crt' |
 if (-not $pair) { Die "no <name>.crt + <name>.key pair found in $BundleDir" }
 
 $tmpl = $null
-foreach ($candidate in @((Join-Path $BundleDir 'config.yml.template'),
-                         (Join-Path $BundleDir 'config.yml'))) {
+foreach ($candidate in @((Join-Path $BundleDir 'config.yml'),
+                         (Join-Path $BundleDir 'config.yml.template'))) {
     if (Test-Path -LiteralPath $candidate) { $tmpl = $candidate; break }
 }
-if (-not $tmpl) { Die "config.yml.template / config.yml not found in $BundleDir" }
+if (-not $tmpl) { Die "config.yml not found in $BundleDir" }
 
 # --- render the config for the chosen directory -----------------------------
 $dirYaml = $Dir -replace '\\', '/'

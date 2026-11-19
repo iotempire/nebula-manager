@@ -328,7 +328,7 @@ travel with the certificate.
 `off|use|am|am+use` + relay list) next to the existing firewall preference.
 Node config rendering appends the block from it; `cert relay` rewrites the
 stored `<name>.yml`; `pki_bundle_client_zip` re-applies it onto
-`config.yml.template`, so a bundle can never ship a stale relay stanza.
+`config.yml`, so a bundle can never ship a stale relay stanza.
 `PKI_RELAY_OVERRIDE` renders a hypothetical setting for `--dry-run`, which is
 why the preview diffs are byte-identical to the real write.
 
@@ -360,3 +360,42 @@ specification used to judge UX changes.
 **Consequences.** A new feature updates: its page, the README table, the
 documentation map, `docs/usage.md` (CLI reference), and — if it changes
 behaviour — this file.
+
+---
+
+## ADR-17 — The bundle carries `config.yml`, not `config.yml.template`
+
+**Status:** accepted · **Context:** the file was never a template: it is the
+ready node config (`/etc/nebula` paths, real firewall, real relay block), and the
+installers only rebase those paths when `--dir` is used. Calling it
+`config.yml.template` made people look for placeholders, and made “policy in the
+config in the template in the bundle” the normal way to describe one file.
+
+**Decision.** Bundles ship **`config.yml`**. `lib/bundle/install.sh` and
+`install.ps1` still accept a legacy `config.yml.template`, so bundles handed out
+before the rename keep installing; `import --bundle` already accepted both.
+
+The three artifacts keep one job each: `<name>.yml` (workspace source of truth) →
+bundle `config.yml` (copy) → `/etc/nebula/config.yml` (on the node).
+
+---
+
+## ADR-18 — A policy must be explainable where it is selected
+
+**Status:** accepted · **Context:** menus and packs were named things like
+`group-ulno` or `family-home`; the only way to know what they allowed was to open
+the YAML. A class policy that silently blocked ICMP or opened a service was
+invisible until something broke.
+
+**Decision.** Every place a policy can be chosen states its effect:
+`policy explain` (rules in one line + unmatched action), `policy list` (one rule
+line per pack), pack entries in the TUI menus, the `cert firewall` preview, and
+the bundle log. The one-line form is generated from the YAML
+(`policy_summary`), never hand-written, so it cannot drift.
+
+**Consequences.** A new policy source (another mode, another pack format) must
+render through `policy_summary`. Group semantics stay as in ADR-5 (one rule per
+group); the summary prints them separated by commas so the OR is visible.
+
+**Open.** The menu reorganisation (identity / policies / distribution / this
+host) is documented in `docs/policy-cookbook.md` and tracked in the roadmap.

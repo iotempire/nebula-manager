@@ -83,7 +83,7 @@ readme="$(unzip -p "$out_dir/alice.mesh-nebula-bundle.zip" README.txt)"
 assert_contains "README has the croc client line" "$readme" "croc --yes"
 assert_contains "README mentions the policy pack" "$readme" "policy pack 'students'"
 assert_contains "README keeps the code placeholder" "$readme" "CROC-CODE"
-tmpl="$(unzip -p "$out_dir/alice.mesh-nebula-bundle.zip" config.yml.template)"
+tmpl="$(unzip -p "$out_dir/alice.mesh-nebula-bundle.zip" config.yml)"
 assert_contains "client template uses the pack firewall" "$tmpl" "inbound_action: drop"
 
 # --- croc --dry-run -----------------------------------------------------------

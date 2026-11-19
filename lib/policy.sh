@@ -21,7 +21,7 @@
 #         proto: any
 #         host: any
 #
-# Packs are embedded into generated client `config.yml.template` files and can
+# Packs are embedded into generated client `config.yml` files and can
 # be exported per host for an existing fleet. Nothing here needs root; applying
 # a pack to the local /etc/nebula config uses the usual working-copy/elevation
 # helpers.
@@ -100,11 +100,48 @@ _policy_rule_count() {
     yq -r '((.firewall.inbound // []) | length) + ((.firewall.outbound // []) | length)' "$1" 2>/dev/null
 }
 
-# policy_list ; one line per pack (name, target groups, rule count, description).
+# policy_summary <pack-or-config> ; one line describing what the firewall allows.
+#   inbound: group home any, icmp · outbound: any
+policy_summary() {
+    local f="${1:-}" json
+    [[ -f "$f" ]] || return 1
+    json="$(yq -o=json '.firewall // {}' "$f" 2>/dev/null)" || return 1
+    [[ -n "$json" && "$json" != "null" ]] || return 1
+    jq -r '
+      def tgt:
+        if .group then "group " + (.group | tostring)
+        elif .groups then "groups " + (.groups | join("+"))
+        elif .host then (if ((.host | tostring) == "any") then "any" else "host " + (.host | tostring) end)
+        elif .cidr then "cidr " + (.cidr | tostring)
+        else "any" end;
+      def svc:
+        [ (if ((.proto // "any") | tostring) != "any" then (.proto | tostring) else empty end),
+          (if ((.port  // "any") | tostring) != "any" then "port " + (.port | tostring) else empty end) ]
+        | join(" ");
+      def one: (tgt) as $t | (svc) as $s |
+        if $t == "any" then (if $s == "" then "any" else $s + " from any" end)
+        elif $s == "" then $t
+        else $t + " " + $s end;
+      def dir($k): ((.[$k] // []) | if length == 0 then "none" else map(one) | join(", ") end);
+      "inbound: " + dir("inbound") + " · outbound: " + dir("outbound")
+    ' <<<"$json" 2>/dev/null
+}
+
+# policy_summary_short <pack-or-config> ; compact form for menu labels.
+#   in: group home, icmp · out: any
+policy_summary_short() {
+    local s
+    s="$(policy_summary "${1:-}")" || return 1
+    s="${s//inbound: /in: }"
+    s="${s// · outbound: / · out: }"
+    printf '%s' "$s"
+}
+
+# policy_list ; one line per pack: name, suggested groups, what it allows.
 policy_list() {
     local d; d="$(policy_dir)"
     local -a lines=()
-    local f name groups desc count gdisp
+    local f name groups gdisp summary
     if [[ -d "$d" ]]; then
         for f in "$d"/*.yml; do
             [[ -f "$f" ]] || continue
@@ -112,18 +149,82 @@ policy_list() {
             [[ -n "$name" ]] || name="$(basename "$f" .yml)"
             groups="$(yq -r '.groups // [] | join(",")' "$f" 2>/dev/null)"
             gdisp="${groups//,/:}"
-            desc="$(yq -r '.description // ""' "$f" 2>/dev/null)"
-            count="$(_policy_rule_count "$f")"
-            lines+=("$(printf '  %-16s %-20s %4s rule(s)  %s' \
-                "$name" "${gdisp:-—}" "${count:-0}" "${desc}")")
+            summary="$(policy_summary "$f" 2>/dev/null)" || summary="(cannot read)"
+            lines+=("$(printf '  %-18s %-16s %s' "$name" "${gdisp:--}" "$summary")")
         done
     fi
     if (( ${#lines[@]} )); then
         printf 'Policy packs in %s\n' "$d"
         printf '%s\n' "${lines[@]}" | sort
+        printf '\nWhat a pack does in detail: nebula-manager policy explain <name>\n'
     else
         printf 'No policy packs in %s\n' "$d"
+        printf 'Create one from a config: nebula-manager policy new <name> --from-config FILE\n'
     fi
+}
+
+# policy_explain_cli ; explain a pack, a built-in mode, or a group policy.
+#   policy explain home
+#   policy explain --mode default|permissive
+#   policy explain --group lab01,instructor [--no-icmp]
+policy_explain_cli() {
+    local ref="" mode="" groups="" icmp=1 file="" tmp=""
+    while (( $# )); do
+        case "$1" in
+            --mode)       shift; mode="${1:-}" ;;
+            --mode=*)     mode="${1#*=}" ;;
+            --group|--from-group) shift; groups="${1:-}" ;;
+            --group=*|--from-group=*) groups="${1#*=}" ;;
+            --no-icmp)    icmp=0 ;;
+            -h|--help)
+                cat >&2 <<'EOF'
+Usage: nebula-manager policy explain <pack>
+       nebula-manager policy explain --mode default|permissive
+       nebula-manager policy explain --group G1[,G2] [--no-icmp]
+
+Print what a firewall choice actually allows (inbound/outbound rules and the
+unmatched-traffic action), so a pack can be reviewed before it is deployed.
+EOF
+                return 0 ;;
+            -*) log_error "Unknown option for 'policy explain': $1"; return 2 ;;
+            *)  ref="${ref:-$1}" ;;
+        esac
+        shift
+    done
+
+    if [[ -n "$groups" ]]; then
+        tmp="$(node_fw_render_group_policy "$groups" "$icmp")" || return 1
+        file="$tmp"
+        if (( icmp )); then
+            printf 'Group policy for %s (+ ICMP for diagnostics)\n' "$groups"
+        else
+            printf 'Group policy for %s (no ICMP)\n' "$groups"
+        fi
+    elif [[ -n "$mode" ]]; then
+        case "$mode" in
+            permissive|default) tmp="$(node_fw_render_policy "$mode")" || return 1; file="$tmp" ;;
+            *) log_error "--mode takes permissive or default."; return 2 ;;
+        esac
+        printf 'Built-in mode: %s\n' "$mode"
+    elif [[ -n "$ref" ]]; then
+        file="$(policy_resolve "$ref")" || return 1
+        printf 'Policy pack: %s\n  file: %s\n' "$(basename "$file" .yml)" "$file"
+        local g d
+        g="$(yq -r '.groups // [] | join(", ")' "$file" 2>/dev/null)"
+        d="$(yq -r '.description // ""' "$file" 2>/dev/null)"
+        [[ -n "$g" ]] && printf '  suggested groups: %s\n' "$g"
+        [[ -n "$d" ]] && printf '  %s\n' "$d"
+    else
+        log_error "Give a pack name, --mode or --group (see --help)."
+        return 2
+    fi
+
+    printf '  %s\n' "$(policy_summary "$file")"
+    printf '  unmatched: inbound %s · outbound %s\n' \
+        "$(yq -r '.firewall.inbound_action // "drop"' "$file" 2>/dev/null)" \
+        "$(yq -r '.firewall.outbound_action // "drop"' "$file" 2>/dev/null)"
+    [[ -n "$tmp" ]] && rm -f "$tmp"
+    return 0
 }
 
 policy_show() {
@@ -418,7 +519,7 @@ node_fw_choose_tui() {
     local title prompt
     if [[ "$context" == bundle ]]; then
         title="Bundle firewall"
-        prompt="Which firewall should config.yml.template carry for $cert?"
+        prompt="Which firewall should config.yml carry for $cert?"
     else
         title="Node firewall"
         prompt="Which firewall should the client config for $cert use?"
@@ -529,16 +630,60 @@ policy_pairs() {
     POLICY_PAIRS=()
     local d; d="$(policy_dir)"
     [[ -d "$d" ]] || return 1
-    local f name groups desc
+    local f name groups desc short
     while IFS= read -r f; do
         [[ -f "$f" ]] || continue
         name="$(basename "$f" .yml)"
         groups="$(yq -r '.groups // [] | join(",")' "$f" 2>/dev/null)"
         desc="$name"
-        [[ -n "$groups" ]] && desc+="  [$groups]"
+        [[ -n "$groups" ]] && desc+=" [$groups]"
+        # Show what the pack allows, so the menu is a decision aid, not a name quiz.
+        short="$(policy_summary_short "$f" 2>/dev/null)" && desc+=" — $short"
         POLICY_PAIRS+=( "$name" "$desc" )
     done < <(find "$d" -maxdepth 1 -name '*.yml' -type f | sort)
     (( ${#POLICY_PAIRS[@]} > 0 ))
+}
+
+# policy_name_pick ; choose a pack from the existing ones (prints its name).
+policy_name_pick() {
+    local d; d="$(policy_dir)"
+    local -a pairs=()
+    local f name groups short
+    if [[ -d "$d" ]]; then
+        while IFS= read -r f; do
+            [[ -f "$f" ]] || continue
+            name="$(basename "$f" .yml)"
+            groups="$(yq -r '.groups // [] | join(",")' "$f" 2>/dev/null)"
+            short="$(policy_summary_short "$f" 2>/dev/null)" || short="?"
+            pairs+=( "$name" "${groups:+[$groups] }$short" )
+        done < <(find "$d" -maxdepth 1 -name '*.yml' -type f | sort)
+    fi
+    (( ${#pairs[@]} )) || { log_warn "No policy packs in $d yet."; return 1; }
+    ui_menu "Policy packs" "Select a pack (what it allows):" "${pairs[@]}"
+}
+
+# TUI: the pack library - list, explain, edit, create, delete.
+policy_menu_tui() {
+    while true; do
+        local choice name
+        choice="$(ui_menu "Policy packs" \
+            "Reusable firewall fragments (embeddable in bundles, applicable to this host). Store: $(policy_dir)" \
+            list    "List packs: one line of rules each" \
+            explain "Explain a pack / a built-in mode" \
+            edit    "Edit a pack" \
+            new     "Create a pack from a config" \
+            delete  "Delete a pack") " || return 0
+        case "$choice" in
+            list)    policy_list ;;
+            explain) name="$(policy_name_pick)" || continue; policy_explain_cli "$name" ;;
+            edit)    name="$(policy_name_pick)" || continue
+                     "${EDITOR:-${VISUAL:-vi}}" "$(policy_resolve "$name")"
+                     log_info "Saved policy pack: $(policy_resolve "$name")" ;;
+            new)     policy_create_tui ;;
+            delete)  name="$(policy_name_pick)" || continue; policy_cli delete "$name" ;;
+            *)       return 0 ;;
+        esac
+    done
 }
 
 policy_create_tui() {
@@ -663,7 +808,9 @@ policy_usage() {
 Usage: nebula-manager policy <command> [options]
 
 Commands:
-  list                          List packs (name, suggested groups, rule count)
+  list                          List packs with what they allow (one line each)
+  explain <name>|--mode M|--group G
+                                What does this choice actually allow?
   show <name>                   Print a pack
   new <name> [options]          Create a pack from a Nebula config
        --from-config FILE       Source config (default: this host's config.yml)
@@ -773,6 +920,7 @@ policy_cli() {
     case "$sub" in
         dir)       policy_dir; printf '\n' ;;
         list|ls)   policy_list ;;
+        explain|describe) policy_explain_cli "$@" ;;
         show)      policy_show "${1:-}" ;;
         new|create) policy_new_cli "$@" ;;
         edit)
